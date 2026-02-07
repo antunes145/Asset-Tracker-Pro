@@ -30,11 +30,29 @@ export const projects = pgTable("projects", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const equipmentTypes = pgTable("equipment_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  weeklyCost: decimal("weekly_cost", { precision: 10, scale: 2 }).notNull(),
+  fourWeekCost: decimal("four_week_cost", { precision: 10, scale: 2 }).notNull(),
+  pickupCost: decimal("pickup_cost", { precision: 10, scale: 2 }).default("0"),
+  dropoffCost: decimal("dropoff_cost", { precision: 10, scale: 2 }).default("0"),
+  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const equipmentCatalog = pgTable("equipment_catalog", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   type: text("type").notNull(),
   baseMonthlyCost: decimal("base_monthly_cost", { precision: 10, scale: 2 }).notNull(),
+  weeklyCost: decimal("weekly_cost", { precision: 10, scale: 2 }),
+  fourWeekCost: decimal("four_week_cost", { precision: 10, scale: 2 }),
+  pickupCost: decimal("pickup_cost", { precision: 10, scale: 2 }).default("0"),
+  dropoffCost: decimal("dropoff_cost", { precision: 10, scale: 2 }).default("0"),
+  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0"),
+  miscCost: decimal("misc_cost", { precision: 10, scale: 2 }).default("0"),
+  miscDescription: text("misc_description"),
   vendor: text("vendor"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -51,6 +69,12 @@ export const rentals = pgTable("rentals", {
   returnDate: date("return_date"),
   contractRenewalDate: date("contract_renewal_date"),
   monthlyCost: decimal("monthly_cost", { precision: 10, scale: 2 }).notNull(),
+  weeklyCost: decimal("weekly_cost", { precision: 10, scale: 2 }),
+  pickupCost: decimal("pickup_cost", { precision: 10, scale: 2 }).default("0"),
+  dropoffCost: decimal("dropoff_cost", { precision: 10, scale: 2 }).default("0"),
+  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0"),
+  miscCost: decimal("misc_cost", { precision: 10, scale: 2 }).default("0"),
+  miscDescription: text("misc_description"),
   status: rentalStatusEnum("status").notNull().default("active"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -92,6 +116,7 @@ export const settings = pgTable("settings", {
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertEquipmentTypeSchema = createInsertSchema(equipmentTypes).omit({ id: true, createdAt: true });
 export const insertEquipmentSchema = createInsertSchema(equipmentCatalog).omit({ id: true, createdAt: true });
 export const insertRentalSchema = createInsertSchema(rentals).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, createdAt: true });
@@ -104,6 +129,9 @@ export type User = typeof users.$inferSelect;
 
 export type InsertProject = z.infer<typeof insertProjectSchema>;
 export type Project = typeof projects.$inferSelect;
+
+export type InsertEquipmentType = z.infer<typeof insertEquipmentTypeSchema>;
+export type EquipmentType = typeof equipmentTypes.$inferSelect;
 
 export type InsertEquipment = z.infer<typeof insertEquipmentSchema>;
 export type Equipment = typeof equipmentCatalog.$inferSelect;

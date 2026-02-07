@@ -9,6 +9,7 @@ import { storage } from "./storage";
 import {
   insertProjectSchema,
   insertEquipmentSchema,
+  insertEquipmentTypeSchema,
   insertRentalSchema,
   insertUserSchema,
 } from "@shared/schema";
@@ -576,6 +577,81 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Equipment Types CRUD (managed in Settings)
+  app.get("/api/equipment-types", async (req: Request, res: Response) => {
+    try {
+      const types = await storage.getEquipmentTypes();
+      res.json(types);
+    } catch (error) {
+      console.error("Error fetching equipment types:", error);
+      res.status(500).json({ error: "Failed to fetch equipment types" });
+    }
+  });
+
+  app.post("/api/equipment-types", requireRole("admin", "manager"), async (req: Request, res: Response) => {
+    try {
+      const data = insertEquipmentTypeSchema.parse(req.body);
+      const eqType = await storage.createEquipmentType(data);
+      await storage.createActivityLog({
+        action: "created",
+        entityType: "equipment_type",
+        entityId: eqType.id,
+        userId: req.session.userId,
+        details: `Added equipment type: ${eqType.name}`,
+      });
+      res.status(201).json(eqType);
+    } catch (error) {
+      console.error("Error creating equipment type:", error);
+      res.status(400).json({ error: "Failed to create equipment type" });
+    }
+  });
+
+  app.patch("/api/equipment-types/:id", requireRole("admin", "manager"), async (req: Request, res: Response) => {
+    try {
+      const validFields = ["name", "weeklyCost", "fourWeekCost", "pickupCost", "dropoffCost", "taxPercent"];
+      const updates: any = {};
+      for (const field of validFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      const eqType = await storage.updateEquipmentType(req.params.id, updates);
+      if (!eqType) {
+        return res.status(404).json({ error: "Equipment type not found" });
+      }
+      await storage.createActivityLog({
+        action: "updated",
+        entityType: "equipment_type",
+        entityId: eqType.id,
+        userId: req.session.userId,
+        details: `Updated equipment type: ${eqType.name}`,
+      });
+      res.json(eqType);
+    } catch (error) {
+      console.error("Error updating equipment type:", error);
+      res.status(400).json({ error: "Failed to update equipment type" });
+    }
+  });
+
+  app.delete("/api/equipment-types/:id", requireRole("admin"), async (req: Request, res: Response) => {
+    try {
+      const eqType = await storage.getEquipmentType(req.params.id);
+      await storage.deleteEquipmentType(req.params.id);
+      await storage.createActivityLog({
+        action: "deleted",
+        entityType: "equipment_type",
+        entityId: req.params.id,
+        userId: req.session.userId,
+        details: `Deleted equipment type: ${eqType?.name || req.params.id}`,
+      });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting equipment type:", error);
+      res.status(500).json({ error: "Failed to delete equipment type" });
+    }
+  });
+
   // Equipment CRUD
   app.get("/api/equipment", async (req: Request, res: Response) => {
     try {
@@ -607,7 +683,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/equipment/:id", requireRole("admin", "manager"), async (req: Request, res: Response) => {
     try {
-      const validFields = ["name", "type", "baseMonthlyCost", "vendor", "notes"];
+      const validFields = ["name", "type", "baseMonthlyCost", "weeklyCost", "fourWeekCost", "pickupCost", "dropoffCost", "taxPercent", "miscCost", "miscDescription", "vendor", "notes"];
       const updates: any = {};
       for (const field of validFields) {
         if (req.body[field] !== undefined) {
@@ -683,7 +759,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/rentals/:id", requireRole("admin", "manager"), async (req: Request, res: Response) => {
     try {
       const validFields = ["projectId", "equipmentId", "equipmentName", "equipmentType", "vendor", 
-                          "rentalStartDate", "returnDate", "contractRenewalDate", "monthlyCost", "status", "notes"];
+                          "rentalStartDate", "returnDate", "contractRenewalDate", "monthlyCost", "weeklyCost",
+                          "pickupCost", "dropoffCost", "taxPercent", "miscCost", "miscDescription", "status", "notes"];
       const updates: any = {};
       for (const field of validFields) {
         if (req.body[field] !== undefined) {

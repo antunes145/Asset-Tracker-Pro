@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +12,7 @@ import {
   Trash2,
   DollarSign,
   Building2,
+  Calculator,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +49,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -59,41 +74,104 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Equipment } from "@shared/schema";
+import type { Equipment, EquipmentType } from "@shared/schema";
 
 const equipmentFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   type: z.string().min(1, "Type is required"),
   baseMonthlyCost: z.string().min(1, "Base monthly cost is required"),
+  weeklyCost: z.string().optional(),
+  fourWeekCost: z.string().optional(),
+  pickupCost: z.string().optional(),
+  dropoffCost: z.string().optional(),
+  taxPercent: z.string().optional(),
+  miscCost: z.string().optional(),
+  miscDescription: z.string().optional(),
   vendor: z.string().optional(),
   notes: z.string().optional(),
 });
 
 type EquipmentFormData = z.infer<typeof equipmentFormSchema>;
 
-const equipmentTypes = [
-  "Excavator",
-  "Bulldozer",
-  "Crane",
-  "Loader",
-  "Forklift",
-  "Generator",
-  "Compressor",
-  "Scaffolding",
-  "Pump",
-  "Truck",
-  "Trailer",
-  "Other",
-];
-
-function formatCurrency(amount: string | number): string {
+function formatCurrency(amount: string | number | null | undefined): string {
+  if (amount === null || amount === undefined || amount === "") return "$0";
   const num = typeof amount === "string" ? parseFloat(amount) : amount;
+  if (isNaN(num)) return "$0";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(num);
+}
+
+function CostSummary({ form }: { form: any }) {
+  const weeklyCost = parseFloat(form.watch("weeklyCost") || "0");
+  const fourWeekCost = parseFloat(form.watch("fourWeekCost") || "0");
+  const pickupCost = parseFloat(form.watch("pickupCost") || "0");
+  const dropoffCost = parseFloat(form.watch("dropoffCost") || "0");
+  const taxPercent = parseFloat(form.watch("taxPercent") || "0");
+  const miscCost = parseFloat(form.watch("miscCost") || "0");
+
+  const subtotal = fourWeekCost + pickupCost + dropoffCost + miscCost;
+  const taxAmount = subtotal * (taxPercent / 100);
+  const total = subtotal + taxAmount;
+
+  if (fourWeekCost <= 0 && weeklyCost <= 0) return null;
+
+  return (
+    <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+      <div className="flex items-center gap-2 mb-2">
+        <Calculator className="h-4 w-4 text-primary" />
+        <span className="text-sm font-medium">Cost Breakdown (4-week estimate)</span>
+      </div>
+      <div className="grid grid-cols-2 gap-1 text-sm">
+        {weeklyCost > 0 && (
+          <>
+            <span className="text-muted-foreground">Weekly Rate:</span>
+            <span className="text-right">{formatCurrency(weeklyCost)}</span>
+          </>
+        )}
+        {fourWeekCost > 0 && (
+          <>
+            <span className="text-muted-foreground">4-Week Rate:</span>
+            <span className="text-right">{formatCurrency(fourWeekCost)}</span>
+          </>
+        )}
+        {pickupCost > 0 && (
+          <>
+            <span className="text-muted-foreground">Pickup:</span>
+            <span className="text-right">{formatCurrency(pickupCost)}</span>
+          </>
+        )}
+        {dropoffCost > 0 && (
+          <>
+            <span className="text-muted-foreground">Drop-off:</span>
+            <span className="text-right">{formatCurrency(dropoffCost)}</span>
+          </>
+        )}
+        {miscCost > 0 && (
+          <>
+            <span className="text-muted-foreground">Misc:</span>
+            <span className="text-right">{formatCurrency(miscCost)}</span>
+          </>
+        )}
+      </div>
+      <Separator />
+      <div className="grid grid-cols-2 gap-1 text-sm">
+        <span className="text-muted-foreground">Subtotal:</span>
+        <span className="text-right">{formatCurrency(subtotal)}</span>
+        {taxPercent > 0 && (
+          <>
+            <span className="text-muted-foreground">Tax ({taxPercent}%):</span>
+            <span className="text-right">{formatCurrency(taxAmount)}</span>
+          </>
+        )}
+        <span className="font-semibold">Total:</span>
+        <span className="text-right font-semibold">{formatCurrency(total)}</span>
+      </div>
+    </div>
+  );
 }
 
 export default function EquipmentPage() {
@@ -101,10 +179,15 @@ export default function EquipmentPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEquipment, setEditingEquipment] = useState<Equipment | null>(null);
+  const [typeSearchOpen, setTypeSearchOpen] = useState(false);
   const { toast } = useToast();
 
   const { data: equipment, isLoading } = useQuery<Equipment[]>({
     queryKey: ["/api/equipment"],
+  });
+
+  const { data: equipmentTypes } = useQuery<EquipmentType[]>({
+    queryKey: ["/api/equipment-types"],
   });
 
   const form = useForm<EquipmentFormData>({
@@ -113,10 +196,28 @@ export default function EquipmentPage() {
       name: "",
       type: "",
       baseMonthlyCost: "",
+      weeklyCost: "",
+      fourWeekCost: "",
+      pickupCost: "0",
+      dropoffCost: "0",
+      taxPercent: "0",
+      miscCost: "0",
+      miscDescription: "",
       vendor: "",
       notes: "",
     },
   });
+
+  const handleSelectEquipmentType = (eqType: EquipmentType) => {
+    form.setValue("type", eqType.name);
+    form.setValue("weeklyCost", eqType.weeklyCost);
+    form.setValue("fourWeekCost", eqType.fourWeekCost);
+    form.setValue("baseMonthlyCost", eqType.fourWeekCost);
+    form.setValue("pickupCost", eqType.pickupCost || "0");
+    form.setValue("dropoffCost", eqType.dropoffCost || "0");
+    form.setValue("taxPercent", eqType.taxPercent || "0");
+    setTypeSearchOpen(false);
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: EquipmentFormData) => apiRequest("POST", "/api/equipment", data),
@@ -163,6 +264,13 @@ export default function EquipmentPage() {
       name: item.name,
       type: item.type,
       baseMonthlyCost: item.baseMonthlyCost,
+      weeklyCost: item.weeklyCost || "",
+      fourWeekCost: item.fourWeekCost || "",
+      pickupCost: item.pickupCost || "0",
+      dropoffCost: item.dropoffCost || "0",
+      taxPercent: item.taxPercent || "0",
+      miscCost: item.miscCost || "0",
+      miscDescription: item.miscDescription || "",
       vendor: item.vendor || "",
       notes: item.notes || "",
     });
@@ -184,7 +292,7 @@ export default function EquipmentPage() {
   };
 
   const uniqueTypes = equipment
-    ? [...new Set(equipment.map((e) => e.type))].sort()
+    ? Array.from(new Set(equipment.map((e) => e.type))).sort()
     : [];
 
   const filteredEquipment = equipment?.filter((item) => {
@@ -218,17 +326,65 @@ export default function EquipmentPage() {
               Add Equipment
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingEquipment ? "Edit Equipment" : "Add Equipment"}</DialogTitle>
               <DialogDescription>
                 {editingEquipment
                   ? "Update the equipment details below."
-                  : "Add new equipment to your catalog."}
+                  : "Add new equipment to your catalog. Select a type from the database to auto-fill costs."}
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                {equipmentTypes && equipmentTypes.length > 0 && (
+                  <div className="space-y-2">
+                    <FormLabel>Auto-fill from Equipment Database</FormLabel>
+                    <Popover open={typeSearchOpen} onOpenChange={setTypeSearchOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className="w-full justify-start text-muted-foreground font-normal"
+                          data-testid="button-select-type-from-db"
+                        >
+                          <Search className="mr-2 h-4 w-4" />
+                          Search equipment types...
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[400px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Type to search equipment types..." data-testid="input-search-type-db" />
+                          <CommandList>
+                            <CommandEmpty>No equipment type found.</CommandEmpty>
+                            <CommandGroup>
+                              {equipmentTypes.map((eqType) => (
+                                <CommandItem
+                                  key={eqType.id}
+                                  value={eqType.name}
+                                  onSelect={() => handleSelectEquipmentType(eqType)}
+                                  data-testid={`option-type-${eqType.id}`}
+                                >
+                                  <div className="flex items-center justify-between w-full">
+                                    <div className="flex items-center gap-2">
+                                      <Truck className="h-4 w-4 text-muted-foreground" />
+                                      <span>{eqType.name}</span>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                                      <span>{formatCurrency(eqType.weeklyCost)}/wk</span>
+                                      <span>{formatCurrency(eqType.fourWeekCost)}/4wk</span>
+                                    </div>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                )}
+
                 <FormField
                   control={form.control}
                   name="name"
@@ -242,30 +398,62 @@ export default function EquipmentPage() {
                     </FormItem>
                   )}
                 />
+
                 <FormField
                   control={form.control}
                   name="type"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Type / Category</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-equipment-type">
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {equipmentTypes.map((type) => (
-                            <SelectItem key={type} value={type}>
-                              {type}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormControl>
+                        <Input placeholder="Excavator, Crane, etc." {...field} data-testid="input-equipment-type" />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="weeklyCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Weekly Cost ($)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="625.00"
+                            {...field}
+                            data-testid="input-equipment-weekly-cost"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="fourWeekCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>4-Week Cost ($)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="2500.00"
+                            {...field}
+                            data-testid="input-equipment-four-week-cost"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
                 <FormField
                   control={form.control}
                   name="baseMonthlyCost"
@@ -285,6 +473,109 @@ export default function EquipmentPage() {
                     </FormItem>
                   )}
                 />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="pickupCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Pickup Cost ($)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="150.00"
+                            {...field}
+                            data-testid="input-equipment-pickup-cost"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="dropoffCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Drop-off Cost ($)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="150.00"
+                            {...field}
+                            data-testid="input-equipment-dropoff-cost"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="taxPercent"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tax Rate (%)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="8.25"
+                          {...field}
+                          data-testid="input-equipment-tax-percent"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="miscCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Misc Cost ($)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            {...field}
+                            data-testid="input-equipment-misc-cost"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="miscDescription"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Misc Description</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="Fuel surcharge, etc."
+                            {...field}
+                            data-testid="input-equipment-misc-desc"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <CostSummary form={form} />
+
                 <FormField
                   control={form.control}
                   name="vendor"
@@ -369,7 +660,10 @@ export default function EquipmentPage() {
                   <TableHead>Equipment</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Vendor</TableHead>
-                  <TableHead>Monthly Cost</TableHead>
+                  <TableHead>Weekly</TableHead>
+                  <TableHead>4-Week</TableHead>
+                  <TableHead>Pickup/Drop</TableHead>
+                  <TableHead>Tax</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -379,7 +673,10 @@ export default function EquipmentPage() {
                     <TableCell><Skeleton className="h-5 w-40" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-32" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-12" /></TableCell>
                     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                   </TableRow>
                 ))}
@@ -396,13 +693,16 @@ export default function EquipmentPage() {
                   <TableHead>Equipment</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Vendor</TableHead>
-                  <TableHead>Monthly Cost</TableHead>
+                  <TableHead>Weekly</TableHead>
+                  <TableHead>4-Week</TableHead>
+                  <TableHead>Pickup/Drop</TableHead>
+                  <TableHead>Tax</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredEquipment.map((item) => (
-                  <TableRow key={item.id} className="hover-elevate">
+                  <TableRow key={item.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
@@ -410,9 +710,9 @@ export default function EquipmentPage() {
                         </div>
                         <div>
                           <span className="font-medium">{item.name}</span>
-                          {item.notes && (
+                          {item.miscDescription && (
                             <p className="text-xs text-muted-foreground truncate max-w-[200px]">
-                              {item.notes}
+                              Misc: {item.miscDescription} ({formatCurrency(item.miscCost)})
                             </p>
                           )}
                         </div>
@@ -432,10 +732,20 @@ export default function EquipmentPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1 font-medium">
-                        <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
-                        {formatCurrency(item.baseMonthlyCost)}
+                      <span className="font-medium">{formatCurrency(item.weeklyCost)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-medium">{formatCurrency(item.fourWeekCost)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <span>{formatCurrency(item.pickupCost)}</span>
+                        <span className="text-muted-foreground"> / </span>
+                        <span>{formatCurrency(item.dropoffCost)}</span>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{item.taxPercent || "0"}%</Badge>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>

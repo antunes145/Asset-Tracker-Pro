@@ -4,6 +4,7 @@ import {
   users,
   projects,
   equipmentCatalog,
+  equipmentTypes,
   rentals,
   invoices,
   activityLogs,
@@ -14,6 +15,8 @@ import {
   type InsertProject,
   type Equipment,
   type InsertEquipment,
+  type EquipmentType,
+  type InsertEquipmentType,
   type Rental,
   type InsertRental,
   type Invoice,
@@ -37,6 +40,13 @@ export interface IStorage {
   createProject(project: InsertProject): Promise<Project>;
   updateProject(id: string, project: Partial<InsertProject>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<boolean>;
+
+  // Equipment Types (database in settings)
+  getEquipmentTypes(): Promise<EquipmentType[]>;
+  getEquipmentType(id: string): Promise<EquipmentType | undefined>;
+  createEquipmentType(eqType: InsertEquipmentType): Promise<EquipmentType>;
+  updateEquipmentType(id: string, eqType: Partial<InsertEquipmentType>): Promise<EquipmentType | undefined>;
+  deleteEquipmentType(id: string): Promise<boolean>;
 
   // Equipment
   getEquipment(): Promise<Equipment[]>;
@@ -91,7 +101,7 @@ export class DatabaseStorage implements IStorage {
   async updateUser(id: string, userData: Partial<InsertUser>): Promise<User | undefined> {
     const [updated] = await db
       .update(users)
-      .set({ ...userData, updatedAt: new Date() })
+      .set({ ...userData })
       .where(eq(users.id, id))
       .returning();
     return updated;
@@ -137,6 +147,35 @@ export class DatabaseStorage implements IStorage {
 
   async deleteProject(id: string): Promise<boolean> {
     const result = await db.delete(projects).where(eq(projects.id, id));
+    return true;
+  }
+
+  // Equipment Types
+  async getEquipmentTypes(): Promise<EquipmentType[]> {
+    return db.select().from(equipmentTypes).orderBy(equipmentTypes.name);
+  }
+
+  async getEquipmentType(id: string): Promise<EquipmentType | undefined> {
+    const [eqType] = await db.select().from(equipmentTypes).where(eq(equipmentTypes.id, id));
+    return eqType;
+  }
+
+  async createEquipmentType(eqType: InsertEquipmentType): Promise<EquipmentType> {
+    const [created] = await db.insert(equipmentTypes).values(eqType).returning();
+    return created;
+  }
+
+  async updateEquipmentType(id: string, eqType: Partial<InsertEquipmentType>): Promise<EquipmentType | undefined> {
+    const [updated] = await db
+      .update(equipmentTypes)
+      .set(eqType)
+      .where(eq(equipmentTypes.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteEquipmentType(id: string): Promise<boolean> {
+    await db.delete(equipmentTypes).where(eq(equipmentTypes.id, id));
     return true;
   }
 

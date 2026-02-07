@@ -1,25 +1,106 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Settings as SettingsIcon, DollarSign, Clock, Bell, Shield } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import {
+  Settings as SettingsIcon,
+  DollarSign,
+  Clock,
+  Bell,
+  Shield,
+  Plus,
+  Pencil,
+  Trash2,
+  Database,
+  Truck,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Setting } from "@shared/schema";
+import type { Setting, EquipmentType } from "@shared/schema";
+
+const equipmentTypeFormSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  weeklyCost: z.string().min(1, "Weekly cost is required"),
+  fourWeekCost: z.string().min(1, "4-week cost is required"),
+  pickupCost: z.string().optional(),
+  dropoffCost: z.string().optional(),
+  taxPercent: z.string().optional(),
+});
+
+type EquipmentTypeFormData = z.infer<typeof equipmentTypeFormSchema>;
+
+function formatCurrency(amount: string | number | null | undefined): string {
+  if (amount === null || amount === undefined) return "$0";
+  const num = typeof amount === "string" ? parseFloat(amount) : amount;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(num);
+}
 
 export default function Settings() {
   const [prorateEnabled, setProrateEnabled] = useState(false);
   const [renewalAlert7, setRenewalAlert7] = useState(true);
   const [renewalAlert14, setRenewalAlert14] = useState(true);
   const [renewalAlert30, setRenewalAlert30] = useState(true);
+  const [typeDialogOpen, setTypeDialogOpen] = useState(false);
+  const [editingType, setEditingType] = useState<EquipmentType | null>(null);
   const { toast } = useToast();
 
   const { data: settings, isLoading } = useQuery<Setting[]>({
     queryKey: ["/api/settings"],
+  });
+
+  const { data: equipmentTypes, isLoading: typesLoading } = useQuery<EquipmentType[]>({
+    queryKey: ["/api/equipment-types"],
+  });
+
+  const typeForm = useForm<EquipmentTypeFormData>({
+    resolver: zodResolver(equipmentTypeFormSchema),
+    defaultValues: {
+      name: "",
+      weeklyCost: "",
+      fourWeekCost: "",
+      pickupCost: "0",
+      dropoffCost: "0",
+      taxPercent: "0",
+    },
   });
 
   useEffect(() => {
@@ -49,6 +130,46 @@ export default function Settings() {
     },
     onError: () => {
       toast({ title: "Failed to update setting", variant: "destructive" });
+    },
+  });
+
+  const createTypeMutation = useMutation({
+    mutationFn: (data: EquipmentTypeFormData) =>
+      apiRequest("POST", "/api/equipment-types", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment-types"] });
+      setTypeDialogOpen(false);
+      typeForm.reset();
+      toast({ title: "Equipment type added successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to add equipment type", variant: "destructive" });
+    },
+  });
+
+  const updateTypeMutation = useMutation({
+    mutationFn: (data: EquipmentTypeFormData) =>
+      apiRequest("PATCH", `/api/equipment-types/${editingType?.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment-types"] });
+      setTypeDialogOpen(false);
+      setEditingType(null);
+      typeForm.reset();
+      toast({ title: "Equipment type updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update equipment type", variant: "destructive" });
+    },
+  });
+
+  const deleteTypeMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/equipment-types/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment-types"] });
+      toast({ title: "Equipment type deleted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete equipment type", variant: "destructive" });
     },
   });
 
@@ -84,6 +205,33 @@ export default function Settings() {
     });
   };
 
+  const handleEditType = (eqType: EquipmentType) => {
+    setEditingType(eqType);
+    typeForm.reset({
+      name: eqType.name,
+      weeklyCost: eqType.weeklyCost,
+      fourWeekCost: eqType.fourWeekCost,
+      pickupCost: eqType.pickupCost || "0",
+      dropoffCost: eqType.dropoffCost || "0",
+      taxPercent: eqType.taxPercent || "0",
+    });
+    setTypeDialogOpen(true);
+  };
+
+  const handleDeleteType = (eqType: EquipmentType) => {
+    if (confirm(`Are you sure you want to delete "${eqType.name}"?`)) {
+      deleteTypeMutation.mutate(eqType.id);
+    }
+  };
+
+  const onTypeSubmit = (data: EquipmentTypeFormData) => {
+    if (editingType) {
+      updateTypeMutation.mutate(data);
+    } else {
+      createTypeMutation.mutate(data);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -105,6 +253,251 @@ export default function Settings() {
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">Configure your equipment rental tracking preferences</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle>Equipment Types Database</CardTitle>
+                <CardDescription className="mt-1">
+                  Manage equipment types with standard costs. These auto-fill when adding equipment.
+                </CardDescription>
+              </div>
+            </div>
+            <Dialog
+              open={typeDialogOpen}
+              onOpenChange={(open) => {
+                setTypeDialogOpen(open);
+                if (!open) {
+                  setEditingType(null);
+                  typeForm.reset();
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button data-testid="button-add-equipment-type">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Type
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>{editingType ? "Edit Equipment Type" : "Add Equipment Type"}</DialogTitle>
+                  <DialogDescription>
+                    {editingType
+                      ? "Update the equipment type details and costs."
+                      : "Add a new equipment type with standard pricing."}
+                  </DialogDescription>
+                </DialogHeader>
+                <Form {...typeForm}>
+                  <form onSubmit={typeForm.handleSubmit(onTypeSubmit)} className="space-y-4">
+                    <FormField
+                      control={typeForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Equipment Type Name</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="e.g. Excavator, Crane, Bulldozer"
+                              {...field}
+                              data-testid="input-type-name"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={typeForm.control}
+                        name="weeklyCost"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Weekly Cost ($)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="625.00"
+                                {...field}
+                                data-testid="input-type-weekly-cost"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={typeForm.control}
+                        name="fourWeekCost"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>4-Week Cost ($)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="2500.00"
+                                {...field}
+                                data-testid="input-type-four-week-cost"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={typeForm.control}
+                        name="pickupCost"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Pickup Cost ($)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="150.00"
+                                {...field}
+                                data-testid="input-type-pickup-cost"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={typeForm.control}
+                        name="dropoffCost"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Drop-off Cost ($)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="150.00"
+                                {...field}
+                                data-testid="input-type-dropoff-cost"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <FormField
+                      control={typeForm.control}
+                      name="taxPercent"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tax Rate (%)</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="8.25"
+                              {...field}
+                              data-testid="input-type-tax-percent"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <DialogFooter>
+                      <Button
+                        type="submit"
+                        disabled={createTypeMutation.isPending || updateTypeMutation.isPending}
+                        data-testid="button-submit-equipment-type"
+                      >
+                        {createTypeMutation.isPending || updateTypeMutation.isPending
+                          ? "Saving..."
+                          : editingType
+                          ? "Update Type"
+                          : "Add Type"}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {typesLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : equipmentTypes && equipmentTypes.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type Name</TableHead>
+                  <TableHead>Weekly Cost</TableHead>
+                  <TableHead>4-Week Cost</TableHead>
+                  <TableHead>Pickup</TableHead>
+                  <TableHead>Drop-off</TableHead>
+                  <TableHead>Tax %</TableHead>
+                  <TableHead className="w-[100px]">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {equipmentTypes.map((eqType) => (
+                  <TableRow key={eqType.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Truck className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">{eqType.name}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>{formatCurrency(eqType.weeklyCost)}</TableCell>
+                    <TableCell>{formatCurrency(eqType.fourWeekCost)}</TableCell>
+                    <TableCell>{formatCurrency(eqType.pickupCost)}</TableCell>
+                    <TableCell>{formatCurrency(eqType.dropoffCost)}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{eqType.taxPercent || "0"}%</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditType(eqType)}
+                          data-testid={`button-edit-type-${eqType.id}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteType(eqType)}
+                          data-testid={`button-delete-type-${eqType.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Database className="h-10 w-10 text-muted-foreground mb-3" />
+              <p className="text-sm text-muted-foreground text-center">
+                No equipment types added yet. Add types here and they will auto-fill when creating equipment.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
