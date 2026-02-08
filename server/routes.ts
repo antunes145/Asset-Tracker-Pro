@@ -438,6 +438,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           projectCode: project.code,
           totalSpend: Math.round(totalSpend * 100) / 100,
           costToDate: Math.round(costToDate * 100) / 100,
+          budget: project.budget ? parseFloat(project.budget) : null,
+          activeRentals: activeProjectRentals.length,
+          totalRentals: projectRentals.length,
         };
       });
 
