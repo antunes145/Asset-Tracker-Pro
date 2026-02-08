@@ -25,6 +25,7 @@ export const projects = pgTable("projects", {
   address: text("address"),
   startDate: date("start_date"),
   endDate: date("end_date"),
+  budget: decimal("budget", { precision: 12, scale: 2 }),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

@@ -449,65 +449,114 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-              <ClipboardList className="h-5 w-5 text-primary" />
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 shrink-0">
+              <ClipboardList className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Active Rentals</p>
-              <p className="text-2xl font-bold" data-testid="text-active-rentals-count">
+              <p className="text-xs text-muted-foreground">Active Rentals</p>
+              <p className="text-lg font-bold" data-testid="text-active-rentals-count">
                 {rentals?.filter((r) => r.status === "active").length || 0}
               </p>
             </div>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10">
-              <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-500/10 shrink-0">
+              <DollarSign className="h-4 w-4 text-green-600 dark:text-green-400" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Monthly Rate</p>
-              <p className="text-2xl font-bold" data-testid="text-monthly-spend">{formatCurrency(totalMonthlySpend)}</p>
+              <p className="text-xs text-muted-foreground">Monthly Rate</p>
+              <p className="text-lg font-bold" data-testid="text-monthly-spend">{formatCurrency(totalMonthlySpend)}</p>
             </div>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500/10">
-              <TrendingUp className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500/10 shrink-0">
+              <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Cost to Date</p>
-              <p className="text-2xl font-bold" data-testid="text-cost-to-date">{formatCurrency(totalCostToDate)}</p>
+              <p className="text-xs text-muted-foreground">Invoices</p>
+              <p className="text-lg font-bold">{invoices?.length || 0}</p>
             </div>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10">
-              <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-500/10 shrink-0">
+              <DollarSign className="h-4 w-4 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Invoices</p>
-              <p className="text-2xl font-bold">{invoices?.length || 0}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-500/10">
-              <DollarSign className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Total Invoiced</p>
-              <p className="text-2xl font-bold">{formatCurrency(totalInvoiceAmount)}</p>
+              <p className="text-xs text-muted-foreground">Total Invoiced</p>
+              <p className="text-lg font-bold">{formatCurrency(totalInvoiceAmount)}</p>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {(() => {
+        const budgetAmount = project.budget ? parseFloat(project.budget) : 0;
+        const budgetPercent = budgetAmount > 0 ? Math.min((totalCostToDate / budgetAmount) * 100, 100) : 0;
+        const overBudget = budgetAmount > 0 && totalCostToDate > budgetAmount;
+        const remaining = budgetAmount > 0 ? budgetAmount - totalCostToDate : 0;
+
+        return (
+          <Card className={overBudget ? "border-destructive/50" : ""}>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-full shrink-0 ${overBudget ? "bg-destructive/10" : "bg-orange-500/10"}`}>
+                    <TrendingUp className={`h-4 w-4 ${overBudget ? "text-destructive" : "text-orange-600 dark:text-orange-400"}`} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Cost to Date vs Budget</p>
+                    <p className="text-lg font-bold" data-testid="text-cost-to-date">
+                      {formatCurrency(totalCostToDate)}
+                      {budgetAmount > 0 && (
+                        <span className="text-sm font-normal text-muted-foreground"> / {formatCurrency(budgetAmount)}</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                {budgetAmount > 0 && (
+                  <div className="text-right">
+                    {overBudget ? (
+                      <Badge variant="destructive" data-testid="badge-over-budget">
+                        Over by {formatCurrency(Math.abs(remaining))}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" data-testid="badge-remaining-budget">
+                        {formatCurrency(remaining)} remaining
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </div>
+              {budgetAmount > 0 && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>{budgetPercent.toFixed(0)}% of budget used</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${overBudget ? "bg-destructive" : budgetPercent > 80 ? "bg-orange-500" : "bg-green-500"}`}
+                      style={{ width: `${Math.min(budgetPercent, 100)}%` }}
+                      data-testid="progress-budget"
+                    />
+                  </div>
+                </div>
+              )}
+              {budgetAmount === 0 && (
+                <p className="text-xs text-muted-foreground">No budget set for this project. Edit the project to add an equipment rental budget.</p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {(project.address || project.startDate || project.endDate || project.notes) && (
         <Card>

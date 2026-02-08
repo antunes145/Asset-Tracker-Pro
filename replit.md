@@ -41,7 +41,7 @@ The backend follows a modular structure:
 
 Key entities:
 - Users (with role-based access: admin, manager, viewer)
-- Projects (construction projects with status tracking)
+- Projects (construction projects with status tracking, optional equipment rental budget)
 - Equipment Types (standard equipment type definitions with costs - managed in Settings)
 - Equipment Catalog (equipment instances with vendor and cost info, auto-fill from types)
 - Rentals (links equipment to projects with date ranges, supports open contracts with cost-to-date tracking)

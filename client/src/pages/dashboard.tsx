@@ -4,10 +4,7 @@ import {
   ClipboardList,
   FolderKanban,
   AlertTriangle,
-  Clock,
   TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,38 +40,36 @@ function StatCard({
   value,
   description,
   icon: Icon,
-  trend,
-  trendDirection,
+  compact,
 }: {
   title: string;
   value: string | number;
   description?: string;
   icon: React.ElementType;
-  trend?: string;
-  trendDirection?: "up" | "down";
+  compact?: boolean;
 }) {
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        {description && (
-          <p className="text-xs text-muted-foreground mt-1">{description}</p>
-        )}
-        {trend && (
-          <div className="flex items-center gap-1 mt-2">
-            {trendDirection === "up" ? (
-              <ArrowUpRight className="h-3 w-3 text-success" />
-            ) : (
-              <ArrowDownRight className="h-3 w-3 text-destructive" />
+      <CardContent className={compact ? "flex items-center gap-3 p-4" : "p-4"}>
+        {compact ? (
+          <>
+            <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground truncate">{title}</p>
+              <p className="text-lg font-bold leading-tight">{value}</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-xs font-medium text-muted-foreground">{title}</p>
+              <Icon className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="text-lg font-bold">{value}</div>
+            {description && (
+              <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
             )}
-            <span className={`text-xs ${trendDirection === "up" ? "text-success" : "text-destructive"}`}>
-              {trend}
-            </span>
-          </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -128,46 +123,51 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Total Monthly Rate"
           value={formatCurrency(stats?.totalMonthlySpend || 0)}
-          description="Active equipment monthly costs"
           icon={DollarSign}
+          compact
         />
         <StatCard
           title="Total Cost to Date"
           value={formatCurrency(stats?.totalCostToDate || 0)}
-          description="Accumulated rental costs"
           icon={TrendingUp}
+          compact
         />
-        <StatCard
-          title="Open Contracts"
-          value={stats?.openContractsCount || 0}
-          description="Active open-ended rentals"
-          icon={Clock}
-        />
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard
           title="Active Rentals"
           value={stats?.activeRentalsCount || 0}
-          description="Currently rented equipment"
           icon={ClipboardList}
+          compact
         />
         <StatCard
           title="Active Projects"
           value={stats?.projectsCount || 0}
-          description="Projects with rentals"
           icon={FolderKanban}
-        />
-        <StatCard
-          title="Renewals Due Soon"
-          value={stats?.renewalsDueSoon || 0}
-          description="Within next 30 days"
-          icon={AlertTriangle}
+          compact
         />
       </div>
+
+      {(stats?.renewalsDueSoon || 0) > 0 && (
+        <Card className="border-orange-500/50 bg-orange-500/5">
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500/10 shrink-0">
+              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm">Renewals Due Within 7 Days</p>
+              <p className="text-xs text-muted-foreground">
+                {stats?.renewalsDueSoon} equipment rental{(stats?.renewalsDueSoon || 0) > 1 ? "s" : ""} approaching renewal
+              </p>
+            </div>
+            <Badge variant="destructive" data-testid="badge-renewals-count">
+              {stats?.renewalsDueSoon}
+            </Badge>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -309,7 +309,7 @@ export default function Dashboard() {
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5" />
+                <AlertTriangle className="h-5 w-5" />
                 Renewal Alerts
               </CardTitle>
               <CardDescription>Contracts due for renewal soon</CardDescription>

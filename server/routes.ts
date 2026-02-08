@@ -381,7 +381,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (!r.contractRenewalDate || r.status !== "active") return false;
         const renewalDate = new Date(r.contractRenewalDate);
         const diffDays = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        return diffDays >= 0 && diffDays <= maxAlertDays;
+        return diffDays >= 0 && diffDays <= 7;
       }).length;
 
       res.json({
@@ -499,9 +499,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         storage.getProjects(),
       ]);
 
-      const alertDays = await getRenewalAlertDays();
-      const maxAlertDays = Math.max(...alertDays);
-
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
@@ -513,18 +510,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const daysUntilRenewal = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
           const project = allProjects.find((p) => p.id === r.projectId);
           
-          const alertLevel = alertDays.find(d => daysUntilRenewal <= d) || maxAlertDays;
-          
           return {
             rentalId: r.id,
             equipmentName: r.equipmentName,
             projectName: project?.name || "Unknown",
             renewalDate: r.contractRenewalDate,
             daysUntilRenewal,
-            alertLevel,
           };
         })
-        .filter((a) => a.daysUntilRenewal >= 0 && a.daysUntilRenewal <= maxAlertDays)
+        .filter((a) => a.daysUntilRenewal >= 0 && a.daysUntilRenewal <= 7)
         .sort((a, b) => a.daysUntilRenewal - b.daysUntilRenewal);
 
       res.json(alerts);

@@ -62,6 +62,7 @@ const projectFormSchema = z.object({
   address: z.string().optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  budget: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -170,6 +171,7 @@ export default function Projects() {
       address: "",
       startDate: "",
       endDate: "",
+      budget: "",
       notes: "",
     },
   });
@@ -222,6 +224,7 @@ export default function Projects() {
       address: project.address || "",
       startDate: project.startDate || "",
       endDate: project.endDate || "",
+      budget: project.budget || "",
       notes: project.notes || "",
     });
     setDialogOpen(true);
@@ -239,6 +242,7 @@ export default function Projects() {
       startDate: data.startDate || null,
       endDate: data.endDate || null,
       address: data.address || null,
+      budget: data.budget || null,
       notes: data.notes || null,
     };
     if (editingProject) {
@@ -382,6 +386,19 @@ export default function Projects() {
                     )}
                   />
                 </div>
+                <FormField
+                  control={form.control}
+                  name="budget"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Equipment Rental Budget (Optional)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" min="0" placeholder="e.g. 50000" {...field} data-testid="input-project-budget" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="notes"
