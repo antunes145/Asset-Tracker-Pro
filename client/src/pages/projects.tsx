@@ -234,10 +234,17 @@ export default function Projects() {
   };
 
   const onSubmit = (data: ProjectFormData) => {
+    const cleaned = {
+      ...data,
+      startDate: data.startDate || null,
+      endDate: data.endDate || null,
+      address: data.address || null,
+      notes: data.notes || null,
+    };
     if (editingProject) {
-      updateMutation.mutate(data);
+      updateMutation.mutate(cleaned as any);
     } else {
-      createMutation.mutate(data);
+      createMutation.mutate(cleaned as any);
     }
   };
 

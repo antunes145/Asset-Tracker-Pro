@@ -590,9 +590,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         details: `Created project: ${project.name}`,
       });
       res.status(201).json(project);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating project:", error);
-      res.status(400).json({ error: "Failed to create project" });
+      if (error?.code === '23505') {
+        res.status(400).json({ error: "A project with this code already exists" });
+      } else if (error?.issues) {
+        res.status(400).json({ error: error.issues.map((i: any) => i.message).join(', ') });
+      } else {
+        res.status(400).json({ error: "Failed to create project" });
+      }
     }
   });
 
