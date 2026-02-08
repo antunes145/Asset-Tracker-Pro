@@ -54,7 +54,10 @@ Key entities:
 ### Open Contract / Cost-to-Date System
 - Rentals can be marked as "Open Contract" (open-ended, no return date)
 - Cost accrues monthly on the renewal date (same day of month as rental start date)
-- Cost-to-date formula: (renewal_cycles × monthly_cost) + pickup + dropoff + misc + tax
+- Cost-to-date formula: (renewal_cycles × monthly_cost) + pickup + dropoff + misc, then tax applied to total
+- Pickup and dropoff are ONE-TIME costs, not per renewal. They are added as flat amounts.
+- Dropoff cost only included when contract is closed or returned.
+- Contract renewal date is AUTO-CALCULATED from start date (same day next month), not manually entered
 - Closing a contract sets `contractClosedDate` and stops cost accrual
 - API endpoint: `POST /api/rentals/:id/close-contract`
 - Cost-to-date is calculated both client-side (project detail, reports) and server-side (dashboard stats)

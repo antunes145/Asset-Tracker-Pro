@@ -354,10 +354,31 @@ export default function ProjectDetail() {
   };
 
   const onSubmit = (data: RentalFormData) => {
+    let renewalDate: string | null = data.contractRenewalDate || null;
+    if (data.isOpenContract && data.rentalStartDate) {
+      const start = new Date(data.rentalStartDate + "T00:00:00");
+      const renewalDay = start.getDate();
+      const nextMonth = start.getMonth() + 1;
+      const nextYear = start.getFullYear() + (nextMonth > 11 ? 1 : 0);
+      const normalizedMonth = nextMonth % 12;
+      const daysInNextMonth = new Date(nextYear, normalizedMonth + 1, 0).getDate();
+      const actualDay = Math.min(renewalDay, daysInNextMonth);
+      const renewal = new Date(nextYear, normalizedMonth, actualDay);
+      renewalDate = renewal.toISOString().split("T")[0];
+    }
+
+    const cleaned = {
+      ...data,
+      returnDate: data.returnDate || null,
+      contractRenewalDate: renewalDate,
+      vendor: data.vendor || null,
+      notes: data.notes || null,
+      equipmentId: data.equipmentId || null,
+    };
     if (editingRental) {
-      updateMutation.mutate(data);
+      updateMutation.mutate(cleaned as any);
     } else {
-      createMutation.mutate(data);
+      createMutation.mutate(cleaned as any);
     }
   };
 
@@ -694,38 +715,7 @@ export default function ProjectDetail() {
                           )}
                         />
                       )}
-                      {isOpenContract && (
-                        <FormField
-                          control={form.control}
-                          name="contractRenewalDate"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Next Renewal Date</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} data-testid="input-rental-renewal-date" />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      )}
                     </div>
-
-                    {!isOpenContract && (
-                      <FormField
-                        control={form.control}
-                        name="contractRenewalDate"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Contract Renewal Date</FormLabel>
-                            <FormControl>
-                              <Input type="date" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    )}
 
                     <FormField
                       control={form.control}
