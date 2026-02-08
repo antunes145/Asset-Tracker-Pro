@@ -42,10 +42,22 @@ The backend follows a modular structure:
 Key entities:
 - Users (with role-based access: admin, manager, viewer)
 - Projects (construction projects with status tracking)
-- Equipment Catalog (equipment types with vendor and cost info)
-- Rentals (links equipment to projects with date ranges)
+- Equipment Types (standard equipment type definitions with costs - managed in Settings)
+- Equipment Catalog (equipment instances with vendor and cost info, auto-fill from types)
+- Rentals (links equipment to projects with date ranges, supports open contracts with cost-to-date tracking)
+  - `isOpenContract`: boolean flag for open-ended rentals
+  - `contractClosedDate`: date when open contract was closed
+  - Cost-to-date: calculated by counting monthly renewal cycles from start date
 - Invoices (with file attachment support)
 - Activity Logs and Settings
+
+### Open Contract / Cost-to-Date System
+- Rentals can be marked as "Open Contract" (open-ended, no return date)
+- Cost accrues monthly on the renewal date (same day of month as rental start date)
+- Cost-to-date formula: (renewal_cycles × monthly_cost) + pickup + dropoff + misc + tax
+- Closing a contract sets `contractClosedDate` and stops cost accrual
+- API endpoint: `POST /api/rentals/:id/close-contract`
+- Cost-to-date is calculated both client-side (project detail, reports) and server-side (dashboard stats)
 
 ### Authentication & Authorization
 - Session-based auth stored in PostgreSQL via connect-pg-simple

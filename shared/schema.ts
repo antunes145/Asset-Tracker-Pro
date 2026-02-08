@@ -75,6 +75,8 @@ export const rentals = pgTable("rentals", {
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0"),
   miscCost: decimal("misc_cost", { precision: 10, scale: 2 }).default("0"),
   miscDescription: text("misc_description"),
+  isOpenContract: boolean("is_open_contract").default(false),
+  contractClosedDate: date("contract_closed_date"),
   status: rentalStatusEnum("status").notNull().default("active"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -155,6 +157,8 @@ export type InvoiceWithDetails = Invoice & { rental?: Rental; project?: Project 
 // Dashboard types
 export interface DashboardStats {
   totalMonthlySpend: number;
+  totalCostToDate: number;
+  openContractsCount: number;
   activeRentalsCount: number;
   projectsCount: number;
   overdueReturnsCount: number;

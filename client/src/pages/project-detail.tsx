@@ -18,6 +18,8 @@ import {
   Trash2,
   Download,
   Eye,
+  XCircle,
+  TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +58,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -77,6 +80,7 @@ const rentalFormSchema = z.object({
   returnDate: z.string().optional(),
   contractRenewalDate: z.string().optional(),
   monthlyCost: z.string().min(1, "Monthly cost is required"),
+  isOpenContract: z.boolean().default(false),
   status: z.enum(["active", "returned", "overdue", "pending"]),
   notes: z.string().optional(),
 });
@@ -114,6 +118,97 @@ function formatCurrency(amount: string | number | null): string {
   }).format(num);
 }
 
+function calculateCostToDate(rental: Rental): number {
+  const monthlyCost = parseFloat(rental.monthlyCost);
+  const startDate = new Date(rental.rentalStartDate + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  let endDate: Date;
+  if (rental.isOpenContract && rental.contractClosedDate) {
+    endDate = new Date(rental.contractClosedDate + "T00:00:00");
+  } else if (rental.isOpenContract) {
+    endDate = today;
+  } else if (rental.returnDate) {
+    endDate = new Date(rental.returnDate + "T00:00:00");
+  } else {
+    endDate = today;
+  }
+
+  if (endDate < startDate) return 0;
+
+  const renewalDay = startDate.getDate();
+  let renewalCount = 0;
+  let checkDate = new Date(startDate);
+
+  while (true) {
+    const nextMonth = checkDate.getMonth() + 1;
+    const nextYear = checkDate.getFullYear() + (nextMonth > 11 ? 1 : 0);
+    const normalizedMonth = nextMonth % 12;
+    const daysInNextMonth = new Date(nextYear, normalizedMonth + 1, 0).getDate();
+    const actualDay = Math.min(renewalDay, daysInNextMonth);
+    const nextRenewal = new Date(nextYear, normalizedMonth, actualDay);
+
+    if (nextRenewal <= endDate) {
+      renewalCount++;
+      checkDate = nextRenewal;
+    } else {
+      break;
+    }
+  }
+
+  const baseCost = renewalCount * monthlyCost;
+  const pickup = parseFloat(rental.pickupCost || "0");
+  const dropoff = rental.contractClosedDate || rental.returnDate ? parseFloat(rental.dropoffCost || "0") : 0;
+  const misc = parseFloat(rental.miscCost || "0");
+  const subtotal = baseCost + pickup + dropoff + misc;
+  const taxPercent = parseFloat(rental.taxPercent || "0");
+  const tax = subtotal * (taxPercent / 100);
+
+  return subtotal + tax;
+}
+
+function getRenewalCycleCount(rental: Rental): number {
+  const startDate = new Date(rental.rentalStartDate + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  let endDate: Date;
+  if (rental.isOpenContract && rental.contractClosedDate) {
+    endDate = new Date(rental.contractClosedDate + "T00:00:00");
+  } else if (rental.isOpenContract) {
+    endDate = today;
+  } else if (rental.returnDate) {
+    endDate = new Date(rental.returnDate + "T00:00:00");
+  } else {
+    endDate = today;
+  }
+
+  if (endDate < startDate) return 0;
+
+  const renewalDay = startDate.getDate();
+  let count = 0;
+  let checkDate = new Date(startDate);
+
+  while (true) {
+    const nextMonth = checkDate.getMonth() + 1;
+    const nextYear = checkDate.getFullYear() + (nextMonth > 11 ? 1 : 0);
+    const normalizedMonth = nextMonth % 12;
+    const daysInNextMonth = new Date(nextYear, normalizedMonth + 1, 0).getDate();
+    const actualDay = Math.min(renewalDay, daysInNextMonth);
+    const nextRenewal = new Date(nextYear, normalizedMonth, actualDay);
+
+    if (nextRenewal <= endDate) {
+      count++;
+      checkDate = nextRenewal;
+    } else {
+      break;
+    }
+  }
+
+  return count;
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -147,10 +242,13 @@ export default function ProjectDetail() {
       returnDate: "",
       contractRenewalDate: "",
       monthlyCost: "",
+      isOpenContract: false,
       status: "active",
       notes: "",
     },
   });
+
+  const isOpenContract = form.watch("isOpenContract");
 
   const createMutation = useMutation({
     mutationFn: (data: RentalFormData) =>
@@ -198,6 +296,20 @@ export default function ProjectDetail() {
     },
   });
 
+  const closeContractMutation = useMutation({
+    mutationFn: (rentalId: string) =>
+      apiRequest("POST", `/api/rentals/${rentalId}/close-contract`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", id, "rentals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rentals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Contract closed successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to close contract", variant: "destructive" });
+    },
+  });
+
   const handleEquipmentSelect = (equipmentId: string) => {
     const selectedEquipment = equipment?.find((e) => e.id === equipmentId);
     if (selectedEquipment) {
@@ -222,6 +334,7 @@ export default function ProjectDetail() {
       returnDate: rental.returnDate || "",
       contractRenewalDate: rental.contractRenewalDate || "",
       monthlyCost: rental.monthlyCost,
+      isOpenContract: rental.isOpenContract || false,
       status: rental.status,
       notes: rental.notes || "",
     });
@@ -234,6 +347,12 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleCloseContract = (rental: Rental) => {
+    if (confirm(`Close the open contract for "${rental.equipmentName}"? Costs will stop accruing.`)) {
+      closeContractMutation.mutate(rental.id);
+    }
+  };
+
   const onSubmit = (data: RentalFormData) => {
     if (editingRental) {
       updateMutation.mutate(data);
@@ -241,6 +360,8 @@ export default function ProjectDetail() {
       createMutation.mutate(data);
     }
   };
+
+  const totalCostToDate = rentals?.reduce((sum, r) => sum + calculateCostToDate(r), 0) || 0;
 
   const totalMonthlySpend = rentals
     ?.filter((r) => r.status === "active")
@@ -307,7 +428,7 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardContent className="flex items-center gap-4 p-6">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -315,7 +436,7 @@ export default function ProjectDetail() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Active Rentals</p>
-              <p className="text-2xl font-bold">
+              <p className="text-2xl font-bold" data-testid="text-active-rentals-count">
                 {rentals?.filter((r) => r.status === "active").length || 0}
               </p>
             </div>
@@ -327,8 +448,19 @@ export default function ProjectDetail() {
               <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Monthly Spend</p>
-              <p className="text-2xl font-bold">{formatCurrency(totalMonthlySpend)}</p>
+              <p className="text-sm text-muted-foreground">Monthly Rate</p>
+              <p className="text-2xl font-bold" data-testid="text-monthly-spend">{formatCurrency(totalMonthlySpend)}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500/10">
+              <TrendingUp className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Cost to Date</p>
+              <p className="text-2xl font-bold" data-testid="text-cost-to-date">{formatCurrency(totalCostToDate)}</p>
             </div>
           </CardContent>
         </Card>
@@ -461,7 +593,7 @@ export default function ProjectDetail() {
                           <FormItem>
                             <FormLabel>Equipment Name</FormLabel>
                             <FormControl>
-                              <Input placeholder="CAT 320 Excavator" {...field} />
+                              <Input placeholder="CAT 320 Excavator" {...field} data-testid="input-rental-equipment-name" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -474,7 +606,7 @@ export default function ProjectDetail() {
                           <FormItem>
                             <FormLabel>Equipment Type</FormLabel>
                             <FormControl>
-                              <Input placeholder="Excavator" {...field} />
+                              <Input placeholder="Excavator" {...field} data-testid="input-rental-equipment-type" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -490,7 +622,7 @@ export default function ProjectDetail() {
                           <FormItem>
                             <FormLabel>Vendor (Optional)</FormLabel>
                             <FormControl>
-                              <Input placeholder="United Rentals" {...field} />
+                              <Input placeholder="United Rentals" {...field} data-testid="input-rental-vendor" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -503,36 +635,7 @@ export default function ProjectDetail() {
                           <FormItem>
                             <FormLabel>Monthly Cost ($)</FormLabel>
                             <FormControl>
-                              <Input type="number" step="0.01" placeholder="2500.00" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <FormField
-                        control={form.control}
-                        name="rentalStartDate"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Start Date</FormLabel>
-                            <FormControl>
-                              <Input type="date" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="returnDate"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Return Date</FormLabel>
-                            <FormControl>
-                              <Input type="date" {...field} />
+                              <Input type="number" step="0.01" placeholder="2500.00" {...field} data-testid="input-rental-monthly-cost" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -542,17 +645,87 @@ export default function ProjectDetail() {
 
                     <FormField
                       control={form.control}
-                      name="contractRenewalDate"
+                      name="isOpenContract"
                       render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Contract Renewal Date</FormLabel>
+                        <FormItem className="flex flex-row items-center gap-3 rounded-md border p-3">
                           <FormControl>
-                            <Input type="date" {...field} />
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="checkbox-open-contract"
+                            />
                           </FormControl>
-                          <FormMessage />
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-sm font-medium cursor-pointer">Open Contract</FormLabel>
+                            <p className="text-xs text-muted-foreground">
+                              Open-ended rental. Costs accrue monthly on the renewal date until the contract is closed.
+                            </p>
+                          </div>
                         </FormItem>
                       )}
                     />
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="rentalStartDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Start Date</FormLabel>
+                            <FormControl>
+                              <Input type="date" {...field} data-testid="input-rental-start-date" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      {!isOpenContract && (
+                        <FormField
+                          control={form.control}
+                          name="returnDate"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Return Date</FormLabel>
+                              <FormControl>
+                                <Input type="date" {...field} data-testid="input-rental-return-date" />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                      {isOpenContract && (
+                        <FormField
+                          control={form.control}
+                          name="contractRenewalDate"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Next Renewal Date</FormLabel>
+                              <FormControl>
+                                <Input type="date" {...field} data-testid="input-rental-renewal-date" />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                    </div>
+
+                    {!isOpenContract && (
+                      <FormField
+                        control={form.control}
+                        name="contractRenewalDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Contract Renewal Date</FormLabel>
+                            <FormControl>
+                              <Input type="date" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
 
                     <FormField
                       control={form.control}
@@ -624,71 +797,116 @@ export default function ProjectDetail() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Equipment</TableHead>
+                      <TableHead>Contract</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Dates</TableHead>
-                      <TableHead>Monthly Cost</TableHead>
+                      <TableHead>Monthly Rate</TableHead>
+                      <TableHead>Renewals</TableHead>
+                      <TableHead>Cost to Date</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rentals.map((rental) => (
-                      <TableRow key={rental.id} className="hover-elevate">
-                        <TableCell>
-                          <div>
-                            <span className="font-medium">{rental.equipmentName}</span>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <span>{rental.equipmentType}</span>
-                              {rental.vendor && (
-                                <>
-                                  <span>-</span>
-                                  <span>{rental.vendor}</span>
-                                </>
-                              )}
+                    {rentals.map((rental) => {
+                      const costToDate = calculateCostToDate(rental);
+                      const renewals = getRenewalCycleCount(rental);
+
+                      return (
+                        <TableRow key={rental.id} className="hover-elevate" data-testid={`row-rental-${rental.id}`}>
+                          <TableCell>
+                            <div>
+                              <span className="font-medium">{rental.equipmentName}</span>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span>{rental.equipmentType}</span>
+                                {rental.vendor && (
+                                  <>
+                                    <span>-</span>
+                                    <span>{rental.vendor}</span>
+                                  </>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={statusColors[rental.status]}>
-                            {statusLabels[rental.status]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            <div>{new Date(rental.rentalStartDate).toLocaleDateString()}</div>
-                            <div className="text-muted-foreground text-xs">
-                              {rental.returnDate
-                                ? `to ${new Date(rental.returnDate).toLocaleDateString()}`
-                                : "Ongoing"}
+                          </TableCell>
+                          <TableCell>
+                            {rental.isOpenContract ? (
+                              rental.contractClosedDate ? (
+                                <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400" data-testid={`badge-contract-closed-${rental.id}`}>
+                                  Closed
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-orange-500/10 text-orange-600 dark:text-orange-400" data-testid={`badge-contract-open-${rental.id}`}>
+                                  Open
+                                </Badge>
+                              )
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Fixed</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={statusColors[rental.status]}>
+                              {statusLabels[rental.status]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              <div>{new Date(rental.rentalStartDate).toLocaleDateString()}</div>
+                              <div className="text-muted-foreground text-xs">
+                                {rental.isOpenContract && rental.contractClosedDate
+                                  ? `Closed ${new Date(rental.contractClosedDate).toLocaleDateString()}`
+                                  : rental.returnDate
+                                  ? `to ${new Date(rental.returnDate).toLocaleDateString()}`
+                                  : rental.isOpenContract
+                                  ? "Open-ended"
+                                  : "Ongoing"}
+                              </div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-medium">{formatCurrency(rental.monthlyCost)}</span>
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEdit(rental)} className="gap-2">
-                                <Pencil className="h-4 w-4" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDelete(rental)}
-                                className="gap-2 text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-medium">{formatCurrency(rental.monthlyCost)}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm" data-testid={`text-renewals-${rental.id}`}>{renewals}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-bold text-orange-600 dark:text-orange-400" data-testid={`text-cost-to-date-${rental.id}`}>
+                              {formatCurrency(costToDate)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" data-testid={`button-rental-actions-${rental.id}`}>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleEdit(rental)} className="gap-2">
+                                  <Pencil className="h-4 w-4" />
+                                  Edit
+                                </DropdownMenuItem>
+                                {rental.isOpenContract && !rental.contractClosedDate && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleCloseContract(rental)}
+                                    className="gap-2"
+                                    data-testid={`button-close-contract-${rental.id}`}
+                                  >
+                                    <XCircle className="h-4 w-4" />
+                                    Close Contract
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem
+                                  onClick={() => handleDelete(rental)}
+                                  className="gap-2 text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>

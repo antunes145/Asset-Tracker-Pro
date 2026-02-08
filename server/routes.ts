@@ -66,6 +66,56 @@ function calculateProratedCost(monthlyCost: number, startDate: Date, endDate: Da
   return (monthlyCost / daysInMonth) * daysActive;
 }
 
+function calculateRentalCostToDate(rental: any): number {
+  const monthlyCost = parseFloat(rental.monthlyCost);
+  const startDate = new Date(rental.rentalStartDate + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  let endDate: Date;
+  if (rental.isOpenContract && rental.contractClosedDate) {
+    endDate = new Date(rental.contractClosedDate + "T00:00:00");
+  } else if (rental.isOpenContract) {
+    endDate = today;
+  } else if (rental.returnDate) {
+    endDate = new Date(rental.returnDate + "T00:00:00");
+  } else {
+    endDate = today;
+  }
+
+  if (endDate < startDate) return 0;
+
+  const renewalDay = startDate.getDate();
+  let renewalCount = 0;
+  let checkDate = new Date(startDate);
+
+  while (true) {
+    const nextMonth = checkDate.getMonth() + 1;
+    const nextYear = checkDate.getFullYear() + (nextMonth > 11 ? 1 : 0);
+    const normalizedMonth = nextMonth % 12;
+    const daysInNextMonth = new Date(nextYear, normalizedMonth + 1, 0).getDate();
+    const actualDay = Math.min(renewalDay, daysInNextMonth);
+    const nextRenewal = new Date(nextYear, normalizedMonth, actualDay);
+
+    if (nextRenewal <= endDate) {
+      renewalCount++;
+      checkDate = nextRenewal;
+    } else {
+      break;
+    }
+  }
+
+  const baseCost = renewalCount * monthlyCost;
+  const pickup = parseFloat(rental.pickupCost || "0");
+  const dropoff = rental.contractClosedDate || rental.returnDate ? parseFloat(rental.dropoffCost || "0") : 0;
+  const misc = parseFloat(rental.miscCost || "0");
+  const subtotal = baseCost + pickup + dropoff + misc;
+  const taxPercent = parseFloat(rental.taxPercent || "0");
+  const tax = subtotal * (taxPercent / 100);
+
+  return subtotal + tax;
+}
+
 async function getRenewalAlertDays(): Promise<number[]> {
   const settingsList = await storage.getSettings();
   const days: number[] = [];
@@ -307,6 +357,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const activeRentals = allRentals.filter((r) => r.status === "active");
       const overdueRentals = allRentals.filter((r) => r.status === "overdue");
       const activeProjects = allProjects.filter((p) => p.status === "active");
+      const openContracts = allRentals.filter((r) => r.isOpenContract && !r.contractClosedDate && r.status === "active");
 
       const today = new Date();
       let totalMonthlySpend = 0;
@@ -321,6 +372,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
+      let totalCostToDate = 0;
+      for (const rental of allRentals) {
+        totalCostToDate += calculateRentalCostToDate(rental);
+      }
+
       const renewalsDueSoon = allRentals.filter((r) => {
         if (!r.contractRenewalDate || r.status !== "active") return false;
         const renewalDate = new Date(r.contractRenewalDate);
@@ -330,6 +386,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       res.json({
         totalMonthlySpend: Math.round(totalMonthlySpend * 100) / 100,
+        totalCostToDate: Math.round(totalCostToDate * 100) / 100,
+        openContractsCount: openContracts.length,
         activeRentalsCount: activeRentals.length,
         projectsCount: activeProjects.length,
         overdueReturnsCount: overdueRentals.length,
@@ -354,11 +412,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const spendByProject = allProjects.map((project) => {
         const projectRentals = allRentals.filter(
-          (r) => r.projectId === project.id && r.status === "active"
+          (r) => r.projectId === project.id
         );
+        const activeProjectRentals = projectRentals.filter((r) => r.status === "active");
         
         let totalSpend = 0;
-        for (const rental of projectRentals) {
+        for (const rental of activeProjectRentals) {
           const cost = parseFloat(rental.monthlyCost);
           if (prorateEnabled) {
             const startDate = new Date(rental.rentalStartDate);
@@ -368,15 +427,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
         }
 
+        let costToDate = 0;
+        for (const rental of projectRentals) {
+          costToDate += calculateRentalCostToDate(rental);
+        }
+
         return {
           projectId: project.id,
           projectName: project.name,
           projectCode: project.code,
           totalSpend: Math.round(totalSpend * 100) / 100,
+          costToDate: Math.round(costToDate * 100) / 100,
         };
       });
 
-      spendByProject.sort((a, b) => b.totalSpend - a.totalSpend);
+      spendByProject.sort((a, b) => b.costToDate - a.costToDate);
       res.json(spendByProject);
     } catch (error) {
       console.error("Error fetching spend by project:", error);
@@ -760,7 +825,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const validFields = ["projectId", "equipmentId", "equipmentName", "equipmentType", "vendor", 
                           "rentalStartDate", "returnDate", "contractRenewalDate", "monthlyCost", "weeklyCost",
-                          "pickupCost", "dropoffCost", "taxPercent", "miscCost", "miscDescription", "status", "notes"];
+                          "pickupCost", "dropoffCost", "taxPercent", "miscCost", "miscDescription",
+                          "isOpenContract", "contractClosedDate", "status", "notes"];
       const updates: any = {};
       for (const field of validFields) {
         if (req.body[field] !== undefined) {
@@ -783,6 +849,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error updating rental:", error);
       res.status(400).json({ error: "Failed to update rental" });
+    }
+  });
+
+  app.post("/api/rentals/:id/close-contract", requireRole("admin", "manager"), async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) {
+        return res.status(404).json({ error: "Rental not found" });
+      }
+      if (!rental.isOpenContract) {
+        return res.status(400).json({ error: "Rental is not an open contract" });
+      }
+
+      const closedDate = new Date().toISOString().split("T")[0];
+      const updated = await storage.updateRental(req.params.id, {
+        isOpenContract: false,
+        contractClosedDate: closedDate,
+        status: "returned",
+      });
+
+      await storage.createActivityLog({
+        action: "closed_contract",
+        entityType: "rental",
+        entityId: req.params.id,
+        userId: req.session.userId,
+        details: `Closed open contract for: ${rental.equipmentName}`,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error closing contract:", error);
+      res.status(500).json({ error: "Failed to close contract" });
     }
   });
 

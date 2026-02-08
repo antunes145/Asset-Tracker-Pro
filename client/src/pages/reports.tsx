@@ -109,10 +109,62 @@ export default function Reports() {
     0
   );
 
+  const calculateRentalCostToDate = (rental: Rental): number => {
+    const monthlyCost = parseFloat(rental.monthlyCost);
+    const startDate = new Date(rental.rentalStartDate + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let endDate: Date;
+    if (rental.isOpenContract && rental.contractClosedDate) {
+      endDate = new Date(rental.contractClosedDate + "T00:00:00");
+    } else if (rental.isOpenContract) {
+      endDate = today;
+    } else if (rental.returnDate) {
+      endDate = new Date(rental.returnDate + "T00:00:00");
+    } else {
+      endDate = today;
+    }
+
+    if (endDate < startDate) return 0;
+
+    const renewalDay = startDate.getDate();
+    let renewalCount = 0;
+    let checkDate = new Date(startDate);
+
+    while (true) {
+      const nextMonth = checkDate.getMonth() + 1;
+      const nextYear = checkDate.getFullYear() + (nextMonth > 11 ? 1 : 0);
+      const normalizedMonth = nextMonth % 12;
+      const daysInNextMonth = new Date(nextYear, normalizedMonth + 1, 0).getDate();
+      const actualDay = Math.min(renewalDay, daysInNextMonth);
+      const nextRenewal = new Date(nextYear, normalizedMonth, actualDay);
+
+      if (nextRenewal <= endDate) {
+        renewalCount++;
+        checkDate = nextRenewal;
+      } else {
+        break;
+      }
+    }
+
+    const baseCost = renewalCount * monthlyCost;
+    const pickup = parseFloat(rental.pickupCost || "0");
+    const dropoff = rental.contractClosedDate || rental.returnDate ? parseFloat(rental.dropoffCost || "0") : 0;
+    const misc = parseFloat(rental.miscCost || "0");
+    const subtotal = baseCost + pickup + dropoff + misc;
+    const taxPercent = parseFloat(rental.taxPercent || "0");
+    const tax = subtotal * (taxPercent / 100);
+
+    return subtotal + tax;
+  };
+
   const projectSummary = projects?.map((project) => {
     const projectRentals = filteredRentals.filter((r) => r.projectId === project.id);
     const activeRentals = projectRentals.filter((r) => r.status === "active");
     const monthlySpend = activeRentals.reduce((sum, r) => sum + parseFloat(r.monthlyCost), 0);
+    const costToDate = projectRentals.reduce((sum, r) => sum + calculateRentalCostToDate(r), 0);
+    const openContracts = projectRentals.filter((r) => r.isOpenContract && !r.contractClosedDate).length;
     const projectInvoices = filteredInvoices.filter((i) => i.projectId === project.id);
     const totalInvoiced = projectInvoices.reduce(
       (sum, inv) => sum + (inv.amount ? parseFloat(inv.amount) : 0),
@@ -127,6 +179,8 @@ export default function Reports() {
       activeRentals: activeRentals.length,
       totalRentals: projectRentals.length,
       monthlySpend,
+      costToDate,
+      openContracts,
       invoiceCount: projectInvoices.length,
       totalInvoiced,
     };
@@ -165,7 +219,9 @@ export default function Reports() {
       Status: p.status,
       "Active Rentals": p.activeRentals,
       "Total Rentals": p.totalRentals,
-      "Monthly Spend": p.monthlySpend,
+      "Monthly Rate": p.monthlySpend,
+      "Cost to Date": p.costToDate,
+      "Open Contracts": p.openContracts,
       "Invoice Count": p.invoiceCount,
       "Total Invoiced": p.totalInvoiced,
     }));
@@ -397,9 +453,10 @@ export default function Reports() {
                     <TableRow>
                       <TableHead>Project</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Active Rentals</TableHead>
-                      <TableHead>Monthly Spend</TableHead>
-                      <TableHead>Invoices</TableHead>
+                      <TableHead>Rentals</TableHead>
+                      <TableHead>Monthly Rate</TableHead>
+                      <TableHead>Cost to Date</TableHead>
+                      <TableHead>Open Contracts</TableHead>
                       <TableHead>Total Invoiced</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -419,7 +476,10 @@ export default function Reports() {
                         <TableCell className="font-medium">
                           {formatCurrency(project.monthlySpend)}
                         </TableCell>
-                        <TableCell>{project.invoiceCount}</TableCell>
+                        <TableCell className="font-bold text-orange-600 dark:text-orange-400">
+                          {formatCurrency(project.costToDate)}
+                        </TableCell>
+                        <TableCell>{project.openContracts}</TableCell>
                         <TableCell className="font-medium">
                           {formatCurrency(project.totalInvoiced)}
                         </TableCell>

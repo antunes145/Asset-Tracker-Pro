@@ -128,13 +128,27 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard
-          title="Total Monthly Spend"
+          title="Total Monthly Rate"
           value={formatCurrency(stats?.totalMonthlySpend || 0)}
-          description="Current month equipment costs"
+          description="Active equipment monthly costs"
           icon={DollarSign}
         />
+        <StatCard
+          title="Total Cost to Date"
+          value={formatCurrency(stats?.totalCostToDate || 0)}
+          description="Accumulated rental costs"
+          icon={TrendingUp}
+        />
+        <StatCard
+          title="Open Contracts"
+          value={stats?.openContractsCount || 0}
+          description="Active open-ended rentals"
+          icon={Clock}
+        />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard
           title="Active Rentals"
           value={stats?.activeRentalsCount || 0}
@@ -148,16 +162,10 @@ export default function Dashboard() {
           icon={FolderKanban}
         />
         <StatCard
-          title="Overdue Returns"
-          value={stats?.overdueReturnsCount || 0}
-          description="Equipment past return date"
-          icon={AlertTriangle}
-        />
-        <StatCard
           title="Renewals Due Soon"
           value={stats?.renewalsDueSoon || 0}
           description="Within next 30 days"
-          icon={Clock}
+          icon={AlertTriangle}
         />
       </div>
 
@@ -206,8 +214,8 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Top Projects by Spend</CardTitle>
-            <CardDescription>Current month equipment costs by project</CardDescription>
+            <CardTitle>Top Projects by Cost to Date</CardTitle>
+            <CardDescription>Accumulated equipment rental costs by project</CardDescription>
           </CardHeader>
           <CardContent>
             {spendLoading ? (
@@ -235,9 +243,9 @@ export default function Dashboard() {
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
                     }}
-                    formatter={(value: number) => [formatCurrency(value), "Spend"]}
+                    formatter={(value: number) => [formatCurrency(value), "Cost to Date"]}
                   />
-                  <Bar dataKey="totalSpend" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="costToDate" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -252,8 +260,8 @@ export default function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Spend Distribution</CardTitle>
-            <CardDescription>Equipment costs by project</CardDescription>
+            <CardTitle>Cost Distribution</CardTitle>
+            <CardDescription>Accumulated equipment costs by project</CardDescription>
           </CardHeader>
           <CardContent>
             {spendLoading ? (
@@ -268,7 +276,7 @@ export default function Dashboard() {
                     innerRadius={60}
                     outerRadius={100}
                     paddingAngle={2}
-                    dataKey="totalSpend"
+                    dataKey="costToDate"
                     nameKey="projectCode"
                     label={({ projectCode, percent }) =>
                       `${projectCode} (${(percent * 100).toFixed(0)}%)`
