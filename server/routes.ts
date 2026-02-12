@@ -191,6 +191,56 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
+    try {
+      const { username, password, email, fullName } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+
+      const existing = await storage.getUserByUsername(username);
+      if (existing) {
+        return res.status(400).json({ error: "Username already exists" });
+      }
+
+      const passwordHash = await hashPassword(password);
+      const user = await storage.createUser({
+        username,
+        password: passwordHash,
+        email: email || null,
+        fullName: fullName || username,
+        role: "viewer",
+      });
+
+      req.session.userId = user.id;
+      req.session.role = user.role;
+
+      await storage.createActivityLog({
+        action: "registered",
+        entityType: "user",
+        entityId: user.id,
+        userId: user.id,
+        details: `User ${user.username} registered`,
+      });
+
+      res.status(201).json({
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          name: user.fullName,
+          role: user.role,
+        },
+      });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
   app.post("/api/auth/logout", (req: Request, res: Response) => {
     req.session.destroy((err) => {
       if (err) {
