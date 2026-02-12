@@ -253,8 +253,8 @@ export default function EquipmentPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
       toast({ title: "Equipment deleted successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to delete equipment", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to delete equipment", variant: "destructive" });
     },
   });
 

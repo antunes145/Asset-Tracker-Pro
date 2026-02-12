@@ -780,6 +780,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/equipment/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
       const equipment = await storage.getEquipmentById(req.params.id);
+      const allRentals = await storage.getRentals();
+      const linkedRentals = allRentals.filter(r => r.equipmentId === req.params.id);
+      if (linkedRentals.length > 0) {
+        const activeCount = linkedRentals.filter(r => r.status === "active").length;
+        const msg = activeCount > 0
+          ? `Cannot delete this equipment because it has ${activeCount} active rental(s). Remove or reassign the rentals first.`
+          : `Cannot delete this equipment because it is referenced by ${linkedRentals.length} rental(s). Remove the rentals first.`;
+        return res.status(400).json({ error: msg });
+      }
       await storage.deleteEquipment(req.params.id);
       await storage.createActivityLog({
         action: "deleted",
@@ -789,9 +798,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         details: `Deleted equipment: ${equipment?.name || req.params.id}`,
       });
       res.status(204).send();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error deleting equipment:", error);
-      res.status(500).json({ error: "Failed to delete equipment" });
+      if (error?.code === "23503") {
+        res.status(400).json({ error: "Cannot delete this equipment because it is linked to existing rentals. Remove the rentals first." });
+      } else {
+        res.status(500).json({ error: "Failed to delete equipment" });
+      }
     }
   });
 
