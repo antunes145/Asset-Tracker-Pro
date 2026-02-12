@@ -357,7 +357,10 @@ export default function Projects() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: ProjectFormData) => apiRequest("POST", "/api/projects", data),
+    mutationFn: async (data: ProjectFormData) => {
+      const res = await apiRequest("POST", "/api/projects", data);
+      return res;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/spend-by-project"] });
@@ -365,14 +368,16 @@ export default function Projects() {
       form.reset();
       toast({ title: "Project created successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to create project", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to create project", variant: "destructive" });
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: ProjectFormData) =>
-      apiRequest("PATCH", `/api/projects/${editingProject?.id}`, data),
+    mutationFn: async (data: ProjectFormData) => {
+      const res = await apiRequest("PATCH", `/api/projects/${editingProject?.id}`, data);
+      return res;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/spend-by-project"] });
@@ -381,8 +386,8 @@ export default function Projects() {
       form.reset();
       toast({ title: "Project updated successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to update project", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to update project", variant: "destructive" });
     },
   });
 
