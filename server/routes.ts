@@ -132,6 +132,8 @@ async function getRenewalAlertDays(): Promise<number[]> {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  app.set("trust proxy", 1);
+
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "equiptrack-secret-key-change-in-production",
@@ -140,6 +142,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
+        sameSite: "lax",
         maxAge: 24 * 60 * 60 * 1000,
       },
     })
