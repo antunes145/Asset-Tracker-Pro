@@ -64,6 +64,7 @@ export const rentals = pgTable("rentals", {
   projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   equipmentId: varchar("equipment_id").references(() => equipmentCatalog.id),
   equipmentName: text("equipment_name").notNull(),
+  equipmentNumber: text("equipment_number"),
   equipmentType: text("equipment_type").notNull(),
   vendor: text("vendor"),
   rentalStartDate: date("rental_start_date").notNull(),

@@ -74,6 +74,7 @@ import type { Project, Rental, Invoice, Equipment } from "@shared/schema";
 const rentalFormSchema = z.object({
   equipmentId: z.string().optional(),
   equipmentName: z.string().min(1, "Equipment name is required"),
+  equipmentNumber: z.string().optional(),
   equipmentType: z.string().min(1, "Equipment type is required"),
   vendor: z.string().optional(),
   rentalStartDate: z.string().min(1, "Start date is required"),
@@ -236,6 +237,7 @@ export default function ProjectDetail() {
     defaultValues: {
       equipmentId: "",
       equipmentName: "",
+      equipmentNumber: "",
       equipmentType: "",
       vendor: "",
       rentalStartDate: "",
@@ -328,6 +330,7 @@ export default function ProjectDetail() {
     form.reset({
       equipmentId: rental.equipmentId || "",
       equipmentName: rental.equipmentName,
+      equipmentNumber: rental.equipmentNumber || "",
       equipmentType: rental.equipmentType,
       vendor: rental.vendor || "",
       rentalStartDate: rental.rentalStartDate,
@@ -687,6 +690,19 @@ export default function ProjectDetail() {
                     <div className="grid grid-cols-2 gap-4">
                       <FormField
                         control={form.control}
+                        name="equipmentNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Equipment Number (Optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="e.g. EQ-1234" {...field} data-testid="input-rental-equipment-number" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
                         name="vendor"
                         render={({ field }) => (
                           <FormItem>
@@ -698,20 +714,21 @@ export default function ProjectDetail() {
                           </FormItem>
                         )}
                       />
-                      <FormField
-                        control={form.control}
-                        name="monthlyCost"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Monthly Cost ($)</FormLabel>
-                            <FormControl>
-                              <Input type="number" step="0.01" placeholder="2500.00" {...field} data-testid="input-rental-monthly-cost" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                     </div>
+
+                    <FormField
+                      control={form.control}
+                      name="monthlyCost"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Monthly Cost ($)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" placeholder="2500.00" {...field} data-testid="input-rental-monthly-cost" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
                     <FormField
                       control={form.control}
@@ -856,6 +873,12 @@ export default function ProjectDetail() {
                             <div>
                               <span className="font-medium">{rental.equipmentName}</span>
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                {rental.equipmentNumber && (
+                                  <>
+                                    <span>#{rental.equipmentNumber}</span>
+                                    <span>-</span>
+                                  </>
+                                )}
                                 <span>{rental.equipmentType}</span>
                                 {rental.vendor && (
                                   <>
