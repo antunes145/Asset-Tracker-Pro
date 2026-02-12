@@ -167,7 +167,10 @@ function AppContent() {
   }
 
   if (!user) {
-    return <LoginPage onLogin={() => refetch()} />;
+    return <LoginPage onLogin={() => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      refetch();
+    }} />;
   }
 
   return (
