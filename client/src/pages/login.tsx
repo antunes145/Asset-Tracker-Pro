@@ -220,14 +220,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 </form>
               </Form>
 
-              <div className="mt-6 text-center">
-                <p className="text-sm text-muted-foreground">
-                  Demo credentials:
-                </p>
-                <p className="text-sm font-medium mt-1">
-                  admin / admin123
-                </p>
-              </div>
             </>
           ) : (
             <Form {...registerForm}>
