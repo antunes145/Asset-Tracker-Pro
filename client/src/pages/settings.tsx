@@ -14,6 +14,8 @@ import {
   Trash2,
   Database,
   Truck,
+  Users,
+  UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,9 +50,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Setting, EquipmentType } from "@shared/schema";
+import { useAuth } from "@/App";
+import type { Setting, EquipmentType, User } from "@shared/schema";
 
 const equipmentTypeFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -62,6 +72,24 @@ const equipmentTypeFormSchema = z.object({
 });
 
 type EquipmentTypeFormData = z.infer<typeof equipmentTypeFormSchema>;
+
+const createUserFormSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  fullName: z.string().min(1, "Full name is required"),
+  email: z.string().email("Invalid email").or(z.literal("")).optional(),
+  role: z.enum(["admin", "manager", "viewer"]),
+});
+
+const editUserFormSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters").or(z.literal("")).optional(),
+  fullName: z.string().min(1, "Full name is required"),
+  email: z.string().email("Invalid email").or(z.literal("")).optional(),
+  role: z.enum(["admin", "manager", "viewer"]),
+});
+
+type UserFormData = z.infer<typeof createUserFormSchema>;
 
 function formatCurrency(amount: string | number | null | undefined): string {
   if (amount === null || amount === undefined) return "$0";
@@ -81,7 +109,10 @@ export default function Settings() {
   const [renewalAlert30, setRenewalAlert30] = useState(true);
   const [typeDialogOpen, setTypeDialogOpen] = useState(false);
   const [editingType, setEditingType] = useState<EquipmentType | null>(null);
+  const [userDialogOpen, setUserDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const { toast } = useToast();
+  const { isAdmin, user: currentUser } = useAuth();
 
   const { data: settings, isLoading } = useQuery<Setting[]>({
     queryKey: ["/api/settings"],
@@ -90,6 +121,95 @@ export default function Settings() {
   const { data: equipmentTypes, isLoading: typesLoading } = useQuery<EquipmentType[]>({
     queryKey: ["/api/equipment-types"],
   });
+
+  const { data: users, isLoading: usersLoading } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+    enabled: isAdmin,
+  });
+
+  const userForm = useForm<UserFormData>({
+    resolver: zodResolver(editingUser ? editUserFormSchema : createUserFormSchema),
+    defaultValues: {
+      username: "",
+      password: "",
+      fullName: "",
+      email: "",
+      role: "viewer",
+    },
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: (data: UserFormData) =>
+      apiRequest("POST", "/api/users", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setUserDialogOpen(false);
+      userForm.reset();
+      toast({ title: "User created successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to create user", variant: "destructive" });
+    },
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: (data: UserFormData) =>
+      apiRequest("PATCH", `/api/users/${editingUser?.id}`, {
+        ...data,
+        password: data.password || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setUserDialogOpen(false);
+      setEditingUser(null);
+      userForm.reset();
+      toast({ title: "User updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to update user", variant: "destructive" });
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/users/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: "User deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to delete user", variant: "destructive" });
+    },
+  });
+
+  const handleEditUser = (user: User) => {
+    setEditingUser(user);
+    userForm.reset({
+      username: user.username,
+      password: "",
+      fullName: user.fullName || "",
+      email: user.email || "",
+      role: user.role as "admin" | "manager" | "viewer",
+    });
+    setUserDialogOpen(true);
+  };
+
+  const handleDeleteUser = (user: User) => {
+    if (user.id === currentUser?.id) {
+      toast({ title: "You cannot delete your own account", variant: "destructive" });
+      return;
+    }
+    if (confirm(`Are you sure you want to delete user "${user.username}"?`)) {
+      deleteUserMutation.mutate(user.id);
+    }
+  };
+
+  const onUserSubmit = (data: UserFormData) => {
+    if (editingUser) {
+      updateUserMutation.mutate(data);
+    } else {
+      createUserMutation.mutate(data);
+    }
+  };
 
   const typeForm = useForm<EquipmentTypeFormData>({
     resolver: zodResolver(equipmentTypeFormSchema),
@@ -499,6 +619,232 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                <div>
+                  <CardTitle>User Management</CardTitle>
+                  <CardDescription className="mt-1">
+                    Create, edit, and manage user accounts and permissions
+                  </CardDescription>
+                </div>
+              </div>
+              <Dialog
+                open={userDialogOpen}
+                onOpenChange={(open) => {
+                  setUserDialogOpen(open);
+                  if (!open) {
+                    setEditingUser(null);
+                    userForm.reset();
+                  }
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button data-testid="button-add-user">
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Add User
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>{editingUser ? "Edit User" : "Create New User"}</DialogTitle>
+                    <DialogDescription>
+                      {editingUser
+                        ? "Update user details and permissions. Leave password blank to keep current password."
+                        : "Create a new user account with a role assignment."}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Form {...userForm}>
+                    <form onSubmit={userForm.handleSubmit(onUserSubmit)} className="space-y-4">
+                      <FormField
+                        control={userForm.control}
+                        name="username"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Username</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g. jsmith"
+                                {...field}
+                                disabled={!!editingUser}
+                                data-testid="input-user-username"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={userForm.control}
+                        name="fullName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Full Name</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g. John Smith"
+                                {...field}
+                                data-testid="input-user-fullname"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={userForm.control}
+                        name="email"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Email (optional)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="email"
+                                placeholder="e.g. john@company.com"
+                                {...field}
+                                data-testid="input-user-email"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={userForm.control}
+                        name="password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{editingUser ? "New Password (leave blank to keep current)" : "Password"}</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="password"
+                                placeholder={editingUser ? "Leave blank to keep current" : "Minimum 6 characters"}
+                                {...field}
+                                data-testid="input-user-password"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={userForm.control}
+                        name="role"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Role</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-user-role">
+                                  <SelectValue placeholder="Select a role" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="admin">Admin - Full access</SelectItem>
+                                <SelectItem value="manager">Manager - Edit access</SelectItem>
+                                <SelectItem value="viewer">Viewer - Read-only</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <DialogFooter>
+                        <Button
+                          type="submit"
+                          disabled={createUserMutation.isPending || updateUserMutation.isPending}
+                          data-testid="button-submit-user"
+                        >
+                          {createUserMutation.isPending || updateUserMutation.isPending
+                            ? "Saving..."
+                            : editingUser
+                            ? "Update User"
+                            : "Create User"}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </Form>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {usersLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : users && users.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Username</TableHead>
+                    <TableHead>Full Name</TableHead>
+                    <TableHead className="hidden md:table-cell">Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((u) => (
+                    <TableRow key={u.id} data-testid={`row-user-${u.id}`}>
+                      <TableCell className="font-medium">{u.username}</TableCell>
+                      <TableCell>{u.fullName || "-"}</TableCell>
+                      <TableCell className="hidden md:table-cell">{u.email || "-"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            u.role === "admin"
+                              ? "default"
+                              : u.role === "manager"
+                              ? "secondary"
+                              : "outline"
+                          }
+                        >
+                          {u.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEditUser(u)}
+                            data-testid={`button-edit-user-${u.id}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          {u.id !== currentUser?.id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteUser(u)}
+                              data-testid={`button-delete-user-${u.id}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8">
+                <Users className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="text-sm text-muted-foreground text-center">
+                  No users found. Create your first user to get started.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -599,18 +945,18 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-primary" />
-              <CardTitle>User Roles</CardTitle>
-            </div>
-            <CardDescription>
-              Understanding role permissions
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
+        {isAdmin ? (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-primary" />
+                <CardTitle>User Roles</CardTitle>
+              </div>
+              <CardDescription>
+                Admin, Manager, Viewer permissions overview
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
               <div className="p-3 rounded-md bg-muted/50">
                 <p className="font-medium text-sm">Admin</p>
                 <p className="text-xs text-muted-foreground">
@@ -629,9 +975,41 @@ export default function Settings() {
                   Read-only access to all data except user management
                 </p>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-primary" />
+                <CardTitle>User Roles</CardTitle>
+              </div>
+              <CardDescription>
+                Understanding role permissions
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="p-3 rounded-md bg-muted/50">
+                <p className="font-medium text-sm">Admin</p>
+                <p className="text-xs text-muted-foreground">
+                  Full access to users, settings, projects, rentals, invoices, and reports
+                </p>
+              </div>
+              <div className="p-3 rounded-md bg-muted/50">
+                <p className="font-medium text-sm">Manager</p>
+                <p className="text-xs text-muted-foreground">
+                  Can manage projects, rentals, invoices, and view reports
+                </p>
+              </div>
+              <div className="p-3 rounded-md bg-muted/50">
+                <p className="font-medium text-sm">Viewer</p>
+                <p className="text-xs text-muted-foreground">
+                  Read-only access to all data except user management
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
