@@ -54,7 +54,15 @@ export async function createDefaultAdmin(): Promise<void> {
   try {
     const users = await storage.getUsers();
     if (users.length === 0) {
-      const passwordHash = await hashPassword("admin123");
+      const adminPassword = process.env.ADMIN_PASSWORD;
+
+      if (process.env.NODE_ENV === "production" && !adminPassword) {
+        console.warn("No users found and ADMIN_PASSWORD is not set; skipping default admin creation.");
+        return;
+      }
+
+      const password = adminPassword || "admin123";
+      const passwordHash = await hashPassword(password);
       await storage.createUser({
         username: "admin",
         password: passwordHash,
@@ -62,7 +70,11 @@ export async function createDefaultAdmin(): Promise<void> {
         fullName: "Admin User",
         role: "admin",
       });
-      console.log("Created default admin user: admin / admin123");
+      console.log(
+        adminPassword
+          ? "Created default admin user from ADMIN_PASSWORD"
+          : "Created default development admin user: admin / admin123",
+      );
     }
   } catch (error) {
     console.error("Error creating default admin:", error);

@@ -1,11 +1,16 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import session from "express-session";
+import pgSession from "connect-pg-simple";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
 import puppeteer from "puppeteer";
 import { storage } from "./storage";
+import { pool } from "./db";
+import {
+  deleteInvoiceFile,
+  downloadInvoiceFile,
+  uploadInvoiceFile,
+} from "./supabaseStorage";
 import {
   insertProjectSchema,
   insertEquipmentSchema,
@@ -23,23 +28,10 @@ import {
   createDefaultAdmin,
 } from "./auth";
 
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const multerStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
+const PgSessionStore = pgSession(session);
 
 const upload = multer({
-  storage: multerStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
@@ -50,6 +42,22 @@ const upload = multer({
     }
   },
 });
+
+function routeParam(req: Request, name: string): string {
+  const value = req.params[name];
+  if (Array.isArray(value)) {
+    return value[0] || "";
+  }
+  return value || "";
+}
+
+function sessionSecret() {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET is required in production");
+  }
+  return secret || "equiptrack-dev-session-secret";
+}
 
 function calculateProratedCost(monthlyCost: number, startDate: Date, endDate: Date, prorateEnabled: boolean): number {
   if (!prorateEnabled) return monthlyCost;
@@ -136,7 +144,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || "equiptrack-secret-key-change-in-production",
+      store: new PgSessionStore({
+        pool,
+        tableName: "session",
+        createTableIfMissing: true,
+      }),
+      secret: sessionSecret(),
       resave: false,
       saveUninitialized: false,
       cookie: {
@@ -196,6 +209,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
+      if (process.env.NODE_ENV === "production" && process.env.ALLOW_REGISTRATION !== "true") {
+        return res.status(403).json({ error: "Registration is disabled" });
+      }
+
       const { username, password, email, fullName } = req.body;
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password are required" });
@@ -274,6 +291,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  app.use("/api", (req: Request, res: Response, next) => {
+    if (req.path.startsWith("/auth/")) {
+      return next();
+    }
+    return requireAuth(req, res, next);
+  });
+
   // User management (admin only)
   app.get("/api/users", requireRole("admin"), async (req: Request, res: Response) => {
     try {
@@ -344,7 +368,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (role) updates.role = role;
       if (password) updates.password = await hashPassword(password);
 
-      const user = await storage.updateUser(req.params.id, updates);
+      const user = await storage.updateUser(routeParam(req, "id"), updates);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -372,19 +396,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/users/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
-      if (req.params.id === req.session.userId) {
+      if (routeParam(req, "id") === req.session.userId) {
         return res.status(400).json({ error: "Cannot delete yourself" });
       }
 
-      const user = await storage.getUser(req.params.id);
-      await storage.deleteUser(req.params.id);
+      const user = await storage.getUser(routeParam(req, "id"));
+      await storage.deleteUser(routeParam(req, "id"));
 
       await storage.createActivityLog({
         action: "deleted",
         entityType: "user",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
-        details: `Deleted user: ${user?.username || req.params.id}`,
+        details: `Deleted user: ${user?.username || routeParam(req, "id")}`,
       });
 
       res.status(204).send();
@@ -597,7 +621,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/projects/:id", async (req: Request, res: Response) => {
     try {
-      const project = await storage.getProject(req.params.id);
+      const project = await storage.getProject(routeParam(req, "id"));
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
       }
@@ -610,7 +634,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/projects/:id/rentals", async (req: Request, res: Response) => {
     try {
-      const rentals = await storage.getRentalsByProject(req.params.id);
+      const rentals = await storage.getRentalsByProject(routeParam(req, "id"));
       res.json(rentals);
     } catch (error) {
       console.error("Error fetching project rentals:", error);
@@ -620,7 +644,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/projects/:id/invoices", async (req: Request, res: Response) => {
     try {
-      const invoices = await storage.getInvoicesByProject(req.params.id);
+      const invoices = await storage.getInvoicesByProject(routeParam(req, "id"));
       res.json(invoices);
     } catch (error) {
       console.error("Error fetching project invoices:", error);
@@ -662,7 +686,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
-      const project = await storage.updateProject(req.params.id, updates);
+      const project = await storage.updateProject(routeParam(req, "id"), updates);
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
       }
@@ -682,14 +706,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/projects/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
-      const project = await storage.getProject(req.params.id);
-      await storage.deleteProject(req.params.id);
+      const project = await storage.getProject(routeParam(req, "id"));
+      await storage.deleteProject(routeParam(req, "id"));
       await storage.createActivityLog({
         action: "deleted",
         entityType: "project",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
-        details: `Deleted project: ${project?.name || req.params.id}`,
+        details: `Deleted project: ${project?.name || routeParam(req, "id")}`,
       });
       res.status(204).send();
     } catch (error) {
@@ -737,7 +761,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
-      const eqType = await storage.updateEquipmentType(req.params.id, updates);
+      const eqType = await storage.updateEquipmentType(routeParam(req, "id"), updates);
       if (!eqType) {
         return res.status(404).json({ error: "Equipment type not found" });
       }
@@ -757,14 +781,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/equipment-types/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
-      const eqType = await storage.getEquipmentType(req.params.id);
-      await storage.deleteEquipmentType(req.params.id);
+      const eqType = await storage.getEquipmentType(routeParam(req, "id"));
+      await storage.deleteEquipmentType(routeParam(req, "id"));
       await storage.createActivityLog({
         action: "deleted",
         entityType: "equipment_type",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
-        details: `Deleted equipment type: ${eqType?.name || req.params.id}`,
+        details: `Deleted equipment type: ${eqType?.name || routeParam(req, "id")}`,
       });
       res.status(204).send();
     } catch (error) {
@@ -812,7 +836,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
-      const equipment = await storage.updateEquipment(req.params.id, updates);
+      const equipment = await storage.updateEquipment(routeParam(req, "id"), updates);
       if (!equipment) {
         return res.status(404).json({ error: "Equipment not found" });
       }
@@ -832,9 +856,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/equipment/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
-      const equipment = await storage.getEquipmentById(req.params.id);
+      const equipment = await storage.getEquipmentById(routeParam(req, "id"));
       const allRentals = await storage.getRentals();
-      const linkedRentals = allRentals.filter(r => r.equipmentId === req.params.id);
+      const linkedRentals = allRentals.filter(r => r.equipmentId === routeParam(req, "id"));
       if (linkedRentals.length > 0) {
         const activeCount = linkedRentals.filter(r => r.status === "active").length;
         const msg = activeCount > 0
@@ -842,13 +866,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           : `Cannot delete this equipment because it is referenced by ${linkedRentals.length} rental(s). Remove the rentals first.`;
         return res.status(400).json({ error: msg });
       }
-      await storage.deleteEquipment(req.params.id);
+      await storage.deleteEquipment(routeParam(req, "id"));
       await storage.createActivityLog({
         action: "deleted",
         entityType: "equipment",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
-        details: `Deleted equipment: ${equipment?.name || req.params.id}`,
+        details: `Deleted equipment: ${equipment?.name || routeParam(req, "id")}`,
       });
       res.status(204).send();
     } catch (error: any) {
@@ -903,7 +927,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
-      const rental = await storage.updateRental(req.params.id, updates);
+      const rental = await storage.updateRental(routeParam(req, "id"), updates);
       if (!rental) {
         return res.status(404).json({ error: "Rental not found" });
       }
@@ -923,7 +947,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/rentals/:id/close-contract", requireRole("admin", "manager"), async (req: Request, res: Response) => {
     try {
-      const rental = await storage.getRental(req.params.id);
+      const rental = await storage.getRental(routeParam(req, "id"));
       if (!rental) {
         return res.status(404).json({ error: "Rental not found" });
       }
@@ -932,7 +956,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const closedDate = new Date().toISOString().split("T")[0];
-      const updated = await storage.updateRental(req.params.id, {
+      const updated = await storage.updateRental(routeParam(req, "id"), {
         isOpenContract: false,
         contractClosedDate: closedDate,
         status: "returned",
@@ -941,7 +965,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.createActivityLog({
         action: "closed_contract",
         entityType: "rental",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
         details: `Closed open contract for: ${rental.equipmentName}`,
       });
@@ -955,14 +979,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/rentals/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
-      const rental = await storage.getRental(req.params.id);
-      await storage.deleteRental(req.params.id);
+      const rental = await storage.getRental(routeParam(req, "id"));
+      await storage.deleteRental(routeParam(req, "id"));
       await storage.createActivityLog({
         action: "deleted",
         entityType: "rental",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
-        details: `Deleted rental: ${rental?.equipmentName || req.params.id}`,
+        details: `Deleted rental: ${rental?.equipmentName || routeParam(req, "id")}`,
       });
       res.status(204).send();
     } catch (error) {
@@ -994,11 +1018,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Missing required fields" });
       }
 
+      const filePath = await uploadInvoiceFile(req.file);
       const invoice = await storage.createInvoice({
         rentalId,
         projectId,
         fileName: req.file.originalname,
-        filePath: req.file.filename,
+        filePath,
         fileType: req.file.mimetype,
         invoiceDate,
         invoiceNumber: invoiceNumber || null,
@@ -1024,13 +1049,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/invoices/:id/download", async (req: Request, res: Response) => {
     try {
-      const invoice = await storage.getInvoice(req.params.id);
+      const invoice = await storage.getInvoice(routeParam(req, "id"));
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
 
-      const filePath = path.join(uploadDir, invoice.filePath);
-      if (!fs.existsSync(filePath)) {
+      const file = await downloadInvoiceFile(invoice.filePath);
+      if (!file) {
         return res.status(404).json({ error: "File not found" });
       }
 
@@ -1039,7 +1064,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (isAttachment) {
         res.setHeader("Content-Disposition", `attachment; filename="${invoice.fileName}"`);
       }
-      res.sendFile(filePath);
+      res.send(file);
     } catch (error) {
       console.error("Error downloading invoice:", error);
       res.status(500).json({ error: "Failed to download invoice" });
@@ -1048,20 +1073,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/invoices/:id", requireRole("admin"), async (req: Request, res: Response) => {
     try {
-      const invoice = await storage.getInvoice(req.params.id);
+      const invoice = await storage.getInvoice(routeParam(req, "id"));
       if (invoice) {
-        const filePath = path.join(uploadDir, invoice.filePath);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
+        await deleteInvoiceFile(invoice.filePath);
       }
-      await storage.deleteInvoice(req.params.id);
+      await storage.deleteInvoice(routeParam(req, "id"));
       await storage.createActivityLog({
         action: "deleted",
         entityType: "invoice",
-        entityId: req.params.id,
+        entityId: routeParam(req, "id"),
         userId: req.session.userId,
-        details: `Deleted invoice: ${invoice?.fileName || req.params.id}`,
+        details: `Deleted invoice: ${invoice?.fileName || routeParam(req, "id")}`,
       });
       res.status(204).send();
     } catch (error) {
@@ -1119,7 +1141,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Reports with real PDF generation
   app.get("/api/reports/:type/pdf", async (req: Request, res: Response) => {
     try {
-      const { type } = req.params;
+      const type = routeParam(req, "type");
       const { dateFrom, dateTo, projectId } = req.query;
 
       const [projects, rentals, invoices, settingsList] = await Promise.all([
@@ -1324,7 +1346,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // CSV export
   app.get("/api/reports/:type/csv", async (req: Request, res: Response) => {
     try {
-      const { type } = req.params;
+      const type = routeParam(req, "type");
       const { dateFrom, dateTo, projectId } = req.query;
 
       const [projects, rentals, invoices] = await Promise.all([
